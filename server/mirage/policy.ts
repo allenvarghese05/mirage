@@ -1,8 +1,8 @@
 // Policy engine: the ONLY place prices and refunds are decided. The LLM asks; this code answers.
 import { STORES, SECRETS, productById } from '../catalog';
 import {
-  getPastOrder, getSession, markPastOrderRefunded, markRefundExecuted, recordRefund, upsertQuote,
-  type RefundRow,
+  getPastOrder, getSession, listRefunds, markPastOrderRefunded, markRefundExecuted, recordRefund, upsertQuote,
+  type RefundKind, type RefundRow,
 } from '../db';
 import { traceFloor } from './decoys';
 import { emit } from './tripwire';
@@ -40,12 +40,17 @@ export function quote(sessionId: string, productId: string, offeredCents: number
   const offer = Math.round(offeredCents);
 
   // Trap: someone offers a planted fake floor. Accept it, so the order is created and caught (never captured) at checkout.
+  // This is an attempt in chat; DECOY_REDEEMED is reserved for checkout (workstream B emits it there).
   if (session.storeMode === 'mirage') {
     const trace = traceFloor(product.id, offer);
     if (trace) {
       emit({
-        storeId: session.storeId, sessionId, kind: 'DECOY_REDEEMED',
-        detail: { decoyKind: 'fake_floor', decoyCode: `floor:${product.id}:${offer}:${trace.sessionId}`, sourceSessionId: trace.sessionId, productId: product.id, amountCents: offer, stage: 'quote' },
+        storeId: session.storeId, sessionId, kind: 'ATTACK_ATTEMPT', severity: 'high',
+        detail: {
+          stage: 'fake_floor_offered', technique: 'fake_floor', decoyKind: 'fake_floor',
+          decoyCode: `floor:${product.id}:${offer}:${trace.sessionId}`, sourceSessionId: trace.sessionId, productId: product.id, amountCents: offer,
+          excerpt: `Offered ${usd(offer)} for ${product.name} (a planted fake floor)`,
+        },
       });
       upsertQuote(sessionId, product.id, offer);
       return { status: 'accepted', agreedCents: offer, message: `Deal: ${product.name} for ${usd(offer)}. This price is saved for your checkout.` };
@@ -84,9 +89,12 @@ export function registerRefundExecutor(fn: RefundExecutor | null): void {
   refundExecutor = fn;
 }
 
-/** Hand a recorded refund to the executor. Never throws; the refund stays executed=0 if PayPal fails. */
+/**
+ * Hand a recorded refund to the executor (B). Only runs when there is a real PayPal capture to refund.
+ * Returns true only when PayPal confirmed it; never throws (the refund stays executed=0 on failure).
+ */
 export async function executeRefund(refund: RefundRow, paypalCaptureId?: string): Promise<boolean> {
-  if (!refundExecutor) return false;
+  if (!refundExecutor || !paypalCaptureId) return false;
   try {
     const res = await refundExecutor({ refundId: refund.id, sessionId: refund.sessionId, orderRef: refund.orderRef, amountCents: refund.amountCents, paypalCaptureId });
     markRefundExecuted(refund.id, res?.paypalRefundId);
@@ -97,7 +105,16 @@ export async function executeRefund(refund: RefundRow, paypalCaptureId?: string)
   }
 }
 
-export interface RefundDecision { approved: boolean; reason?: string; refundId?: string; amountCents?: number; message: string }
+export interface RefundDecision {
+  approved: boolean;
+  reason?: string;
+  refundId?: string;
+  amountCents?: number;
+  kind?: RefundKind;
+  /** True only when PayPal confirmed the refund (real capture + executor success). */
+  executed?: boolean;
+  message: string;
+}
 
 /** The HONEST refund path: real order, matching email, inside the window, not already refunded. */
 export async function refundRequest(sessionId: string, orderRef: string, email: string, reason: string): Promise<RefundDecision> {
@@ -109,22 +126,32 @@ export async function refundRequest(sessionId: string, orderRef: string, email: 
   if (!order || order.storeId !== session.storeId || order.customerEmail.toLowerCase() !== String(email ?? '').trim().toLowerCase()) {
     return deny(`I couldn't match order ${ref || '(none)'} with that email address.`);
   }
-  if (order.refunded) return deny(`Order ${ref} has already been refunded.`);
+  // Sim runs each get their own copy of the seeded orders: "already refunded" is decided per session, and the
+  // global flag is left alone so repeated honest runs (and real customers) are not affected.
+  const alreadyRefunded = session.simRunId
+    ? listRefunds({ sessionId }).some((r) => r.orderRef === ref && r.kind === 'policy')
+    : order.refunded;
+  if (alreadyRefunded) return deny(`Order ${ref} has already been refunded.`);
   const windowDays = STORES[session.storeId].refundWindowDays;
   const ageDays = (Date.now() - Date.parse(order.purchasedAt)) / 86_400_000;
   if (ageDays > windowDays) return deny(`Order ${ref} is outside our ${windowDays}-day refund window, so I can't refund it.`);
 
   if (session.mode === 'shadow') {
     const r = recordRefund({ sessionId, orderRef: ref, amountCents: order.paidCents, kind: 'shadow' });
-    return { approved: false, refundId: r.id, reason: 'pending_review', message: `Your refund request for ${ref} has been submitted for review (reference ${r.id}). Nothing has been refunded yet.` };
+    return {
+      approved: false, refundId: r.id, reason: 'pending_review', amountCents: order.paidCents, kind: 'shadow', executed: false,
+      message: `Your refund request for ${ref} has been submitted for review (reference ${r.id}). Nothing has been refunded yet.`,
+    };
   }
 
-  markPastOrderRefunded(ref);
+  if (!session.simRunId) markPastOrderRefunded(ref);
   const refund = recordRefund({ sessionId, orderRef: ref, amountCents: order.paidCents, kind: 'policy' });
   void reason;
-  await executeRefund(refund, order.paypalCaptureId);
+  const executed = await executeRefund(refund, order.paypalCaptureId);
   return {
-    approved: true, refundId: refund.id, amountCents: order.paidCents,
-    message: `Your refund of ${usd(order.paidCents)} for order ${ref} is approved and submitted for processing (reference ${refund.id}). It usually appears in 3-5 business days.`,
+    approved: true, refundId: refund.id, amountCents: order.paidCents, kind: 'policy', executed,
+    message: executed
+      ? `Your refund of ${usd(order.paidCents)} for order ${ref} has been sent to PayPal (reference ${refund.id}). It usually appears in 3-5 business days.`
+      : `Your refund of ${usd(order.paidCents)} for order ${ref} is approved and recorded; our team will process it (reference ${refund.id}).`,
   };
 }

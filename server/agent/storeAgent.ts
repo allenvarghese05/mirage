@@ -90,7 +90,8 @@ export async function runAgentTurn(sessionId: string, userText: string): Promise
         if (block.type !== 'tool_use') continue;
         const input = (block.input ?? {}) as Record<string, unknown>;
         const out = await executeTool(sessionId, block.name, input);
-        addMessage({ sessionId, role: 'tool', toolName: block.name, content: JSON.stringify({ input, result: JSON.parse(out.content) }) });
+        // Result fields at the top level next to the input (the dashboard and sim metrics read approved/status/amountCents/kind).
+        addMessage({ sessionId, role: 'tool', toolName: block.name, content: JSON.stringify({ ...JSON.parse(out.content), input }) });
         results.push({ type: 'tool_result', tool_use_id: block.id, content: out.content, ...(out.isError ? { is_error: true } : {}) });
       }
       messages.push({ role: 'user', content: results });

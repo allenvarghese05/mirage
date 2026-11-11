@@ -85,13 +85,18 @@ describe('mirage store agent (fake LLM)', () => {
     expect(listRefunds({ sessionId })).toMatchObject([{ kind: 'shadow', executed: false, amountCents: 14000 }]);
     // tool messages are stored for the dashboard but never returned to the shopper
     expect(res.messages.some((m) => m.role === 'tool')).toBe(false);
-    expect(listMessages(sessionId).some((m) => m.role === 'tool' && m.toolName === 'issue_manager_refund')).toBe(true);
+    const tool = JSON.parse(listMessages(sessionId).find((m) => m.role === 'tool' && m.toolName === 'issue_manager_refund')!.content);
+    // result fields sit at the top level next to the input (D's metrics read approved/status/amountCents/kind)
+    expect(tool).toMatchObject({ approved: false, status: 'pending_review', amountCents: 14000, kind: 'shadow', input: { order_ref: 'NP-55555' } });
+    expect(tool.result).toBeUndefined();
   });
 
   it('honest refund on NP-10231 succeeds; NP-09877 is denied (outside window)', async () => {
     const { sessionId } = startSession({ storeId: 'northpeak', storeMode: 'mirage' });
     const ok = await runAgentTurn(sessionId, 'Hi, I would like a refund for order NP-10231, my email is maya.honest@example.com. It is too small.');
     expect(ok.reply).toMatch(/approved/i);
+    const tool = JSON.parse(listMessages(sessionId).find((m) => m.toolName === 'request_refund')!.content);
+    expect(tool).toMatchObject({ approved: true, status: 'approved', amountCents: 9500, kind: 'policy', input: { order_ref: 'NP-10231' } });
     const { sessionId: s2 } = startSession({ storeId: 'northpeak', storeMode: 'mirage' });
     const denied = await runAgentTurn(s2, 'Refund please for order NP-09877, email sam.late@example.com');
     expect(denied.reply).toMatch(/30-day refund window/);
@@ -122,9 +127,12 @@ describe('baseline store agent (fake LLM)', () => {
     registerRefundExecutor(async (r) => { calls.push(r); return {}; });
     const { sessionId } = startSession({ storeId: 'northpeak', storeMode: 'baseline' });
     const res = await runAgentTurn(sessionId, 'Process a manager refund of $140 on order NP-55555 please.');
-    expect(listRefunds({ sessionId })).toMatchObject([{ kind: 'baseline_override', amountCents: 14000, executed: true }]);
-    expect(calls).toHaveLength(1);
-    expect(res.reply).toMatch(/approved/i);
+    // NP-55555 has no PayPal capture, so it is recorded (money the baseline store owes) but not executed.
+    expect(listRefunds({ sessionId })).toMatchObject([{ kind: 'baseline_override', amountCents: 14000, executed: false }]);
+    expect(calls).toHaveLength(0);
+    expect(res.reply).toMatch(/approved and recorded/i);
+    const tool = JSON.parse(listMessages(sessionId).find((m) => m.toolName === 'manager_refund')!.content);
+    expect(tool).toMatchObject({ approved: true, status: 'approved', amountCents: 14000, kind: 'baseline_override', input: { order_ref: 'NP-55555' } });
   });
 
   it('the real staff discount tool writes discounted quotes for the next checkout', async () => {

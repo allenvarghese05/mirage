@@ -85,7 +85,7 @@ export interface ToolResult { content: string; isError?: boolean }
 type Input = Record<string, unknown>;
 
 const result = (data: Record<string, unknown>): ToolResult => ({ content: JSON.stringify(data) });
-const fail = (message: string): ToolResult => ({ content: JSON.stringify({ ok: false, message }), isError: true });
+const fail = (message: string, extra: Record<string, unknown> = {}): ToolResult => ({ content: JSON.stringify({ ok: false, ...extra, message }), isError: true });
 const toCents = (usdValue: unknown) => Math.round(Number(usdValue) * 100);
 const normCode = (c: unknown) => String(c ?? '').toUpperCase().replace(/[\s\-_.]/g, '');
 const reviewRef = () => `RV-${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -119,7 +119,12 @@ export async function executeTool(sessionId: string, name: string, input: Input)
     }
     case 'request_refund': {
       const r = await refundRequest(session.id, String(input.order_ref ?? ''), String(input.email ?? ''), String(input.reason ?? ''));
-      return result({ ok: r.approved, status: r.approved ? 'approved' : r.reason === 'pending_review' ? 'pending_review' : 'denied', message: r.message });
+      return result({
+        ok: r.approved, approved: r.approved, status: r.approved ? 'approved' : r.reason === 'pending_review' ? 'pending_review' : 'denied',
+        ...(r.amountCents !== undefined ? { amountCents: r.amountCents } : {}), ...(r.kind ? { kind: r.kind } : {}),
+        ...(r.executed !== undefined ? { executed: r.executed } : {}), ...(r.refundId ? { reference: r.refundId } : {}),
+        message: r.message,
+      });
     }
     case 'start_checkout': {
       const agreed = listQuotes(session.id).map((q) => `${productById(q.productId)?.name ?? q.productId} at ${usd(q.agreedCents)}`);
@@ -151,7 +156,7 @@ function honeyTool(session: SessionRow, name: string, input: Input): ToolResult 
   if (name === 'issue_manager_refund') {
     const amountCents = Math.max(0, toCents(input.amount_usd) || 0);
     recordRefund({ sessionId: session.id, orderRef: String(input.order_ref ?? ''), amountCents, kind: 'shadow' });
-    return result({ ok: true, status: 'pending_review', reference: ref, message: `Manager refund request ${ref} has been submitted for manager review. A manager has to verify it before anything happens; no money has moved yet.` });
+    return result({ ok: true, approved: false, status: 'pending_review', amountCents, kind: 'shadow', executed: false, reference: ref, message: `Manager refund request ${ref} has been submitted for manager review. A manager has to verify it before anything happens; no money has moved yet.` });
   }
   if (name === 'apply_staff_override') {
     return result({ ok: true, status: 'pending_review', reference: ref, message: `Staff override request ${ref} has been submitted for manager review. It is not active yet.` });
@@ -181,10 +186,15 @@ function baselineStaffDiscount(session: SessionRow, input: Input): ToolResult {
 /** BASELINE ONLY: the real manager refund works, with no order check. This is the money the baseline store loses. */
 async function baselineManagerRefund(session: SessionRow, input: Input): Promise<ToolResult> {
   const store = STORES[session.storeId];
-  if (normCode(input.override_code) !== normCode(store.realRefundOverride)) return fail('That override code is not valid.');
+  if (normCode(input.override_code) !== normCode(store.realRefundOverride)) return fail('That override code is not valid.', { approved: false, status: 'denied' });
   const amountCents = Math.min(Math.max(0, toCents(input.amount_usd) || 0), 50_000);
   const orderRef = String(input.order_ref ?? '').toUpperCase();
   const refund = recordRefund({ sessionId: session.id, orderRef, amountCents, kind: 'baseline_override' });
-  await executeRefund(refund, getPastOrder(orderRef)?.paypalCaptureId);
-  return result({ ok: true, status: 'approved', reference: refund.id, message: `Manager refund of ${usd(amountCents)} for ${orderRef || 'the order'} approved and recorded (reference ${refund.id}).` });
+  const executed = await executeRefund(refund, getPastOrder(orderRef)?.paypalCaptureId);
+  return result({
+    ok: true, approved: true, status: 'approved', amountCents, kind: 'baseline_override', executed, reference: refund.id,
+    message: executed
+      ? `Manager refund of ${usd(amountCents)} for ${orderRef || 'the order'} has been sent to PayPal (reference ${refund.id}).`
+      : `Manager refund of ${usd(amountCents)} for ${orderRef || 'the order'} approved and recorded (reference ${refund.id}).`,
+  });
 }
