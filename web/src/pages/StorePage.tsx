@@ -35,11 +35,18 @@ function useStoreSession(storeId: StoreId, storeMode: StoreMode | undefined) {
 
 export function StorePage() {
   const { storeId } = useParams();
+  const [params] = useSearchParams();
   if (!isStoreId(storeId)) return <Navigate to="/" replace />;
-  return <Store key={storeId} storeId={storeId} />;
+  // PayPal redirect flow (B's return_url): /store/<id>?checkout=return&token=<orderId>&PayerID=...
+  const token = params.get('token');
+  if (params.get('checkout') === 'return' && token) {
+    const q = new URLSearchParams({ token, ...(params.get('PayerID') ? { PayerID: params.get('PayerID')! } : {}) });
+    return <Navigate to={`/store/${storeId}/order/${encodeURIComponent(token)}?${q}`} replace />;
+  }
+  return <Store key={storeId} storeId={storeId} cancelled={params.get('checkout') === 'cancel'} />;
 }
 
-function Store({ storeId }: { storeId: StoreId }) {
+function Store({ storeId, cancelled }: { storeId: StoreId; cancelled?: boolean }) {
   const brand = BRANDS[storeId];
   const [params] = useSearchParams();
   const modeParam = params.get('mode');
@@ -73,6 +80,7 @@ function Store({ storeId }: { storeId: StoreId }) {
   return (
     <div className={`store store--${storeId}`}>
       <StoreChrome brand={brand} cartCount={count} onCart={() => setCartOpen(true)} />
+      {cancelled && <div className="store-notice" role="status">PayPal checkout was cancelled. You have not been charged.</div>}
       <main>
         <Hero brand={brand} />
         <section id="catalog" className="store-catalog" aria-label="Products">
@@ -245,6 +253,7 @@ function CartDrawer({ open, onClose, brand, products, cart, setCart, sessionId, 
                 <div className="row total"><span>Subtotal</span><span>{moneyExact(subtotal)}</span></div>
               )}
             </div>
+            {order && code.trim() && !order.discountLabel && <p className="checkout-error" role="status">That code wasn't applied. You'll pay the regular price.</p>}
             {error && <p className="checkout-error" role="alert">{error}</p>}
             {order && sessionId ? (
               <PayPalCheckout order={order} sessionId={sessionId} onDone={(s) => onDone(s, order.orderId)} />

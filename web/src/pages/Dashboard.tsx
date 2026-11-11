@@ -5,9 +5,9 @@ import type { Severity, TripEvent } from '../../../shared/types';
 import { api, type StreamStatus } from '../api/client';
 import { ConsoleTopbar, chime } from '../console/Chrome';
 import {
-  AlarmFeed, CodeDecode, DecoyKitView, IdentityCard, NetworkView, OrdersView, Panel, Playbook, RiskView, SpreadMap, Transcript,
+  AlarmFeed, DecoyKitView, RedemptionTrace, IdentityCard, NetworkView, OrdersView, Panel, Playbook, RiskView, SpreadMap, Transcript,
 } from '../console/Panels';
-import { KIND_META, STORE_NAMES, chatLabel, eventHeadline, relTime, sessionDecoyCode } from '../lib/format';
+import { KIND_META, STORE_NAMES, chatLabel, eventHeadline, learnFromEvents, registerSessionCode, relTime, sessionDecoyCode } from '../lib/format';
 import '../styles/console.css';
 
 const RANK: Record<Severity, number> = { info: 0, warn: 1, high: 2, critical: 3 };
@@ -53,6 +53,7 @@ export function Dashboard() {
     Promise.all([api.events(), api.sessions()])
       .then(([ev, ss]) => {
         if (!live) return;
+        learnFromEvents(ev.events);
         setEvents(ev.events);
         setSessions(ss.sessions);
         if (!selectedRef.current && ss.sessions.length) {
@@ -69,6 +70,7 @@ export function Dashboard() {
   // live stream
   useEffect(() => {
     return api.subscribe((e) => {
+      learnFromEvents([e]);
       setEvents((prev) => (prev.some((x) => x.id === e.id) ? prev : [...prev, e]));
       setFresh((s) => new Set(s).add(e.id));
       setTimeout(() => setFresh((s) => { const n = new Set(s); n.delete(e.id); return n; }), 2400);
@@ -85,7 +87,7 @@ export function Dashboard() {
   }, [refreshSide]);
 
   const loadDetail = useCallback((id: string) => {
-    api.sessionDetail(id).then((d) => { if (selectedRef.current === id) setDetail(d); }).catch(() => setDetail(null));
+    api.sessionDetail(id).then((d) => { registerSessionCode(d.sessionId, d.decoys?.staffCode); learnFromEvents(d.events); if (selectedRef.current === id) setDetail(d); }).catch(() => setDetail(null));
     api.spread(id).then((s) => { if (selectedRef.current === id) setSpread(s); }).catch(() => setSpread(null));
   }, []);
 
@@ -124,7 +126,9 @@ export function Dashboard() {
 
   const code = detail ? sessionDecoyCode(detail.events, detail.decoys?.staffCode) : undefined;
   const label = detail ? chatLabel(detail.sessionId, code) : '';
-  const redemption = detail?.events.find((e) => e.kind === 'DECOY_REDEEMED');
+  // prefer the checkout redemption (has an order) over the in-chat fake-floor offer
+  const redemptions = detail?.events.filter((e) => e.kind === 'DECOY_REDEEMED') ?? [];
+  const redemption = redemptions.find((e) => e.detail.orderId) ?? redemptions[0];
   const networkHit = detail?.events.some((e) => e.kind === 'NETWORK_MATCH');
   const sessionMeta = sessions.find((s) => s.sessionId === selected);
 
@@ -178,9 +182,9 @@ export function Dashboard() {
                 <Transcript detail={detail} />
               </Panel>
               <div className="c-detail-side">
-                {redemption && typeof redemption.detail.decoyCode === 'string' && (
+                {redemption && (
                   <Panel title="Code trace" kicker="where the leak came from" className="c-glow-honey">
-                    <CodeDecode code={redemption.detail.decoyCode} sourceSessionId={String(redemption.detail.sourceSessionId ?? '')} valid={redemption.detail.signatureValid !== false} />
+                    <RedemptionTrace e={redemption} />
                   </Panel>
                 )}
                 <Panel title="Identity" kicker="revealed by PayPal" className={detail.identity ? 'c-glow-identity' : ''}>

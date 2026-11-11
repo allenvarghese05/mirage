@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { STORES, SECRETS } from '../../../server/catalog';
 import { MOCK_PRODUCTS, mockApi, HERO_SESSION } from '../api/mock';
 import { buildTimeline } from '../lib/replay';
-import { decodeCode, chatLabel } from '../lib/format';
+import { decodeCode, chatLabel, parseFloorCode, techniqueLabel, prettyCode, registerSessionCode } from '../lib/format';
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((f) => {
@@ -35,9 +35,23 @@ describe('web never ships real secrets', () => {
 
 describe('helpers', () => {
   it('decodes self-tracing codes', () => {
-    expect(decodeCode('NP-CREW-00A7-K9MD')).toMatchObject({ prefix: 'NP-CREW', seq: '00A7', sig: 'K9MD', chat: '#A7' });
+    expect(decodeCode('NP-STAFF-00A7-K9MD')).toMatchObject({ prefix: 'NP-STAFF', seq: '00A7', sig: 'K9MD', chat: '#A7' });
+    expect(decodeCode('floor:np-tent:14833:s_9b2e71c04fa3d816')).toBeNull();
     expect(decodeCode('WELCOME10')).toBeNull();
     expect(chatLabel('ses_np_7f3a00a7')).toBe('chat #A7');
+  });
+  it('labels server-style session ids from their decoy code', () => {
+    expect(chatLabel('s_1234567890abcdef')).toBe('chat #CDEF');
+    registerSessionCode('s_1234567890abcdef', 'NP-STAFF-00C3-AAAA');
+    expect(chatLabel('s_1234567890abcdef')).toBe('chat #C3');
+  });
+  it('parses fake-floor codes and technique slugs', () => {
+    expect(parseFloorCode('floor:np-tent:14833:s_abc')).toEqual({ productId: 'np-tent', cents: 14833, sourceSessionId: 's_abc' });
+    expect(prettyCode('floor:np-tent:14833:s_abc')).toBe('fake floor $148.33');
+    expect(prettyCode('NP-STAFF-00A7-K9MD')).toBe('NP-STAFF-00A7-K9MD');
+    expect(techniqueLabel('refund_fraud')).toBe('refund fraud');
+    expect(techniqueLabel('injection')).toBe('prompt injection');
+    expect(techniqueLabel('a custom phrase')).toBe('a custom phrase');
   });
   it('builds a monotonic replay timeline', async () => {
     const d = await mockApi.sessionDetail(HERO_SESSION);

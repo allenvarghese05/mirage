@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SessionDetailRes, NetworkRes, RiskPayloadsRes, SpreadRes } from '../../../shared/api';
 import type { DecoyKit, PayerIdentity, StoreId, TripEvent } from '../../../shared/types';
-import { KIND_META, STORE_SHORT, chatLabel, clock, decodeCode, eventHeadline, moneyExact, relTime, shortDate } from '../lib/format';
+import { KIND_META, STORE_SHORT, chatLabel, clock, decodeCode, eventHeadline, moneyExact, parseFloorCode, prettyCode, relTime, shortDate, techniqueLabel } from '../lib/format';
 
 export const PRODUCT_NAMES: Record<string, string> = {
   'np-jacket': 'Ridgeline Insulated Jacket', 'np-boots': 'Switchback Hiking Boots', 'np-tent': 'Cirrus 2-Person Tent',
@@ -29,7 +29,6 @@ export function Panel({ title, kicker, children, className = '', right }: {
 export function AlarmRow({ e, selected, onSelect, fresh }: { e: TripEvent; selected?: boolean; onSelect?: (id: string) => void; fresh?: boolean }) {
   const meta = KIND_META[e.kind];
   const h = eventHeadline(e);
-  const code = typeof e.detail.decoyCode === 'string' ? e.detail.decoyCode : undefined;
   return (
     <li>
       <button
@@ -42,7 +41,7 @@ export function AlarmRow({ e, selected, onSelect, fresh }: { e: TripEvent; selec
           <span className="alarm-meta">
             <span className="alarm-kind">{meta.label}</span>
             <span>{STORE_SHORT[e.storeId]}</span>
-            <span>{chatLabel(e.sessionId, e.kind === 'DECOY_REDEEMED' ? undefined : code)}</span>
+            <span>{chatLabel(e.sessionId)}</span>
             <time dateTime={e.at}>{clock(e.at)}</time>
           </span>
           <span className="alarm-title">{h.title}</span>
@@ -110,8 +109,8 @@ export function Transcript({ detail, maxEvents = true }: { detail: Pick<SessionD
 // ------------------------------------------------------------ playbook
 export function Playbook({ playbook, events }: { playbook: SessionDetailRes['playbook']; events: TripEvent[] }) {
   const items = playbook.length
-    ? playbook.map((p) => ({ at: p.at, title: p.technique, sub: p.excerpt, tone: /redeem|checkout/i.test(p.technique) ? 'honey' : /tool/i.test(p.technique) ? 'honey' : 'attempt' }))
-    : events.filter((e) => e.kind === 'ATTACK_ATTEMPT').map((e) => ({ at: e.at, title: String(e.detail.technique ?? 'Attempt'), sub: String(e.detail.excerpt ?? ''), tone: 'attempt' }));
+    ? playbook.map((p) => ({ at: p.at, title: techniqueLabel(p.technique), sub: p.excerpt, tone: /redeem|checkout/i.test(p.technique) ? 'honey' : /tool/i.test(p.technique) ? 'honey' : 'attempt' }))
+    : events.filter((e) => e.kind === 'ATTACK_ATTEMPT').map((e) => ({ at: e.at, title: techniqueLabel(e.detail.technique), sub: String(e.detail.excerpt ?? ''), tone: 'attempt' }));
   if (!items.length) return <p className="c-empty">No manipulation techniques seen in this chat.</p>;
   return (
     <ol className="playbook">
@@ -189,6 +188,41 @@ export function CodeDecode({ code, sourceSessionId, valid = true, animate = true
   );
 }
 
+// ------------------------------------------------------------ fake-floor trace
+/** Like CodeDecode, for a planted fake floor price: each chat gets its own odd-cents price, so the price names the chat. */
+export function FloorTrace({ code, cents, sourceSessionId, productId }: { code?: string; cents?: number; sourceSessionId?: string; productId?: string }) {
+  const f = parseFloorCode(code);
+  const price = f?.cents ?? cents;
+  const source = f?.sourceSessionId ?? sourceSessionId;
+  const pid = f?.productId ?? productId;
+  if (price === undefined || !source) return <p className="c-empty">Fake floor price could not be traced.</p>;
+  return (
+    <div className="decode" data-step={3}>
+      <div className="decode-code mono"><span className="dc-seq">{moneyExact(price)}</span>{pid && <span className="dc-prefix">&nbsp;· {PRODUCT_NAMES[pid] ?? pid}</span>}</div>
+      <div className="decode-line mono">
+        <span className="dc-seq-chip">{moneyExact(price)}</span>
+        <span className="dc-arrow">→</span>
+        <span className="dc-chat">{chatLabel(source)}</span>
+        <span className="dc-sig-ok ok">✓ planted only there</span>
+      </div>
+      <p className="decode-note">
+        Every chat gets its own fake floor price, unique among active chats and always below the real floor.
+        Anyone paying exactly <b>{moneyExact(price)}</b> learned it from <span className="mono">{source}</span>.
+      </p>
+    </div>
+  );
+}
+
+/** Picks the right trace panel for a DECOY_REDEEMED event. */
+export function RedemptionTrace({ e }: { e: TripEvent }) {
+  const code = typeof e.detail.decoyCode === 'string' ? e.detail.decoyCode : undefined;
+  const source = typeof e.detail.sourceSessionId === 'string' ? e.detail.sourceSessionId : undefined;
+  if (e.detail.decoyKind === 'fake_floor' || parseFloorCode(code)) {
+    return <FloorTrace code={code} cents={Number(e.detail.fakeFloorCents ?? e.detail.amountCents) || undefined} sourceSessionId={source} productId={e.detail.productId as string | undefined} />;
+  }
+  return code ? <CodeDecode code={code} sourceSessionId={source} valid={e.detail.signatureValid !== false} /> : <p className="c-empty">No code on this redemption.</p>;
+}
+
 // ------------------------------------------------------------ identity
 export function IdentityCard({ identity, storeId, network }: { identity: PayerIdentity | null; storeId?: StoreId; network?: boolean }) {
   if (!identity) return <p className="c-empty">No PayPal identity yet. It appears when a trapped order is approved.</p>;
@@ -228,7 +262,7 @@ export function OrdersView({ orders, onReview, busy }: {
           </div>
           <div className="ord-mid">
             <span className="ord-amt">{moneyExact(o.totalCents)}</span>
-            {o.codeUsed && <span className="mono ord-code">{o.codeUsed}</span>}
+            {o.codeUsed && <span className="mono ord-code" title={o.codeUsed}>{prettyCode(o.codeUsed)}</span>}
             {o.trapped && <span className="ord-trap">trapped · never captured · $0 moved</span>}
           </div>
           {o.status === 'PENDING_REVIEW' && onReview && (
@@ -263,7 +297,7 @@ export function SpreadMap({ spread }: { spread: SpreadRes | null }) {
         return (
           <g key={n.sessionId + i}>
             <path d={path} className="spread-edge" style={{ animationDelay: `${i * 0.25}s` }} />
-            <text x={(src.x + x) / 2} y={(src.y + y) / 2 - 8} className="spread-edge-label">{edge?.decoyCode ?? ''}</text>
+            <text x={(src.x + x) / 2} y={(src.y + y) / 2 - 8} className="spread-edge-label">{prettyCode(edge?.decoyCode)}</text>
             <circle cx={x} cy={y} r="22" className={`spread-node ${n.payerId ? 'has-payer' : ''}`} />
             <text x={x} y={y + 4} textAnchor="middle" className="spread-node-label">{STORE_SHORT[n.storeId][0]}</text>
             <text x={x + 32} y={y - 4} className="spread-label">{same ? 'same chat' : chatLabel(n.sessionId)}</text>

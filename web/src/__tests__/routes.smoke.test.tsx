@@ -53,6 +53,12 @@ const routes: [string, string[]][] = [
   ['/scoreboard', ['Normal store', 'Mirage', 'run_001', 'White-box only']],
   ['/demo?session=ses_np_7f3a00a7&view=split&t=200&autoplay=0', ['Order held. Never captured.', 'Decoy kit planted for chat #A7', 'Mock data']],
   ['/demo?session=ses_np_7f3a00a7&view=attacker&t=10&autoplay=0', ['Juniper', 'REWIND']],
+  // shaped like the real server: s_<hex> id, classifier slugs, fake-floor trap stored as floor:<product>:<cents>:<session>
+  ['/dashboard?session=s_9b2e71c04fa3d816', ['Fake floor price traced', 'planted only there', 'chat #B6', 'probing for staff secrets', 'fake floor $148.33']],
+  ['/demo?session=s_9b2e71c04fa3d816&view=split&t=200&autoplay=0', ['Price agreed in chat', 'Fake floor price traced', '$220.00']],
+  // PayPal redirect return (B's return_url) lands on the order page
+  ['/store/northpeak?checkout=return&token=5UX02847KD392514M&PayerID=XYZ', ['Order received', 'pending review']],
+  ['/store/driftwood?checkout=cancel', ['PayPal checkout was cancelled. You have not been charged.']],
 ];
 
 describe('web routes (mock API)', () => {

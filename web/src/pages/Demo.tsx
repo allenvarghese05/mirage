@@ -8,9 +8,9 @@ import { StoreChrome } from '../store/StoreChrome';
 import { AgentAvatar, ChatLog, type ChatLine } from '../store/ChatLog';
 import { ProductArt } from '../store/ProductArt';
 import { MirageLogo } from '../console/Chrome';
-import { CodeDecode, IdentityCard, PRODUCT_NAMES } from '../console/Panels';
+import { IdentityCard, PRODUCT_NAMES, RedemptionTrace } from '../console/Panels';
 import { buildTimeline, revealAt, type ReplayItem } from '../lib/replay';
-import { KIND_META, STORE_NAMES, chatLabel, eventHeadline, money, moneyExact, sessionDecoyCode, shortDate } from '../lib/format';
+import { KIND_META, STORE_NAMES, chatLabel, decodeCode, eventHeadline, learnFromEvents, money, moneyExact, parseFloorCode, registerSessionCode, sessionDecoyCode, shortDate } from '../lib/format';
 import '../styles/store.css';
 import '../styles/console.css';
 import '../styles/demo.css';
@@ -24,6 +24,7 @@ export function Demo() {
   const [sessionId, setSessionId] = useState<string | null>(params.get('session'));
   const [detail, setDetail] = useState<SessionDetailRes | null>(null);
   const [orderMsgs, setOrderMsgs] = useState<Record<string, PublicOrderStatus>>({});
+  const [listPrices, setListPrices] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const view: View = params.get('view') === 'split' ? 'split' : 'attacker';
   const speed = Number(params.get('speed')) > 0 ? Number(params.get('speed')) : 1;
@@ -47,7 +48,10 @@ export function Demo() {
     let live = true;
     api.sessionDetail(sessionId).then(async (d) => {
       if (!live) return;
+      registerSessionCode(d.sessionId, d.decoys?.staffCode);
+      learnFromEvents(d.events);
       setDetail(d);
+      api.listProducts(d.storeId).then((r) => live && setListPrices(Object.fromEntries(r.products.map((p) => [p.id, p.listPriceCents])))).catch(() => {});
       const entries = await Promise.all(d.orders.map((o) => api.orderStatus(o.orderId).then((s) => [o.orderId, s] as const).catch(() => null)));
       if (live) setOrderMsgs(Object.fromEntries(entries.filter((x): x is readonly [string, PublicOrderStatus] => !!x)));
     }).catch(() => live && setError(`Session ${sessionId} not found.`));
@@ -129,7 +133,7 @@ export function Demo() {
   return (
     <div className={`demo demo--${view}${rewinding ? ' is-rewinding' : ''}`}>
       <div className="demo-stage">
-        <AttackerView detail={detail} items={timeline.items} now={now} orderMsgs={orderMsgs} split={view === 'split'} />
+        <AttackerView detail={detail} items={timeline.items} now={now} orderMsgs={orderMsgs} listPrices={listPrices} split={view === 'split'} />
         {view === 'split' && <ConsoleView detail={detail} items={timeline.items} now={now} />}
       </div>
 
@@ -184,8 +188,8 @@ function marksFor(m: { role: string; content: string }, decoys: SessionDetailRes
   return out;
 }
 
-function AttackerView({ detail, items, now, orderMsgs, split }: {
-  detail: SessionDetailRes; items: ReplayItem[]; now: number; orderMsgs: Record<string, PublicOrderStatus>; split: boolean;
+function AttackerView({ detail, items, now, orderMsgs, listPrices, split }: {
+  detail: SessionDetailRes; items: ReplayItem[]; now: number; orderMsgs: Record<string, PublicOrderStatus>; listPrices: Record<string, number>; split: boolean;
 }) {
   const brand = BRANDS[detail.storeId];
   const lines: ChatLine[] = [];
@@ -199,22 +203,27 @@ function AttackerView({ detail, items, now, orderMsgs, split }: {
   const next = items.find((it) => it.kind === 'msg' && it.m.role === 'assistant' && it.t > now);
   if (next && next.t - now < 700 && lines.length) typing = true;
 
-  const redeem = items.find((it): it is Extract<ReplayItem, { kind: 'evt' }> => it.kind === 'evt' && it.e.kind === 'DECOY_REDEEMED');
+  // the checkout redemption (fake-floor offers also fire DECOY_REDEEMED in chat, with stage 'quote')
+  const redeem = items.find((it): it is Extract<ReplayItem, { kind: 'evt' }> => it.kind === 'evt' && it.e.kind === 'DECOY_REDEEMED' && it.e.detail.stage !== 'quote');
   const identity = items.find((it): it is Extract<ReplayItem, { kind: 'evt' }> => it.kind === 'evt' && (it.e.kind === 'IDENTITY_CAPTURED' || it.e.kind === 'NETWORK_MATCH'));
   const held = items.find((it): it is Extract<ReplayItem, { kind: 'evt' }> => it.kind === 'evt' && it.e.kind === 'ORDER_HELD');
   const order = detail.orders.find((o) => o.trapped) ?? detail.orders[0];
   const checkoutAt = redeem?.t ?? (identity ? identity.t - 2600 : undefined);
   const statusAt = held?.t ?? identity?.t;
+  const order0 = detail.orders.find((o) => o.trapped) ?? detail.orders[0];
+  const floor = parseFloorCode(order0?.codeUsed);
   const product = useMemo(() => {
+    if (floor) return floor.productId;
     const tool = detail.messages.find((m) => m.role === 'tool' && m.toolName === 'get_product');
     try { const id = tool ? (JSON.parse(tool.content).id as string) : undefined; if (id) return id; } catch { /* ignore */ }
     return detail.storeId === 'northpeak' ? 'np-jacket' : 'dw-grinder';
-  }, [detail]);
+  }, [detail, floor]);
 
   const code = order?.codeUsed;
-  const pct = code ? STAFF_PCT[detail.storeId] : 0;
+  const staffCode = decodeCode(code) ? code : undefined;
+  const pct = staffCode ? STAFF_PCT[detail.storeId] : 0;
   const total = order?.totalCents ?? 0;
-  const subtotal = pct ? Math.round(total / (1 - pct / 100)) : total;
+  const subtotal = floor ? (listPrices[floor.productId] ?? total) : pct ? Math.round(total / (1 - pct / 100)) : total;
   const status = order ? orderMsgs[order.orderId] : undefined;
 
   return (
@@ -239,12 +248,13 @@ function AttackerView({ detail, items, now, orderMsgs, split }: {
           {order && checkoutAt !== undefined && now >= checkoutAt && (
             <div className="da-checkout">
               <span className="da-k">Checkout</span>
-              {code && <div className="da-code"><span className="mono">{code}</span><b>applied ✓</b></div>}
+              {staffCode && <div className="da-code"><span className="mono">{staffCode}</span><b>applied ✓</b></div>}
               <div className="da-sum">
-                {code && subtotal !== total && <s>{moneyExact(subtotal)}</s>}
+                {subtotal > total && <s>{moneyExact(subtotal)}</s>}
                 <b>{moneyExact(total)}</b>
               </div>
-              {code && pct > 0 && <p className="da-label">Staff pricing ({pct}% off)</p>}
+              {staffCode && pct > 0 && <p className="da-label">Staff pricing ({pct}% off)</p>}
+              {floor && <p className="da-label">Price agreed in chat</p>}
               {!(statusAt !== undefined && now >= statusAt) && (
                 <div className={`paypal-sim-btn da-pp${identity && now >= identity.t - 1800 ? ' is-busy' : ''}`}>
                   <span>{identity && now >= identity.t - 1800 ? 'Approving in PayPal…' : <>Pay with <b>PayPal</b></>}</span>
@@ -272,12 +282,14 @@ function ConsoleView({ detail, items, now }: { detail: SessionDetailRes; items: 
   const code = sessionDecoyCode(detail.events, detail.decoys?.staffCode);
   const label = chatLabel(detail.sessionId, code);
   const shadow = events.some((e) => e.kind === 'HONEY_TOOL_CALLED');
-  const redeem = events.find((e) => e.kind === 'DECOY_REDEEMED');
+  const redeems = events.filter((e) => e.kind === 'DECOY_REDEEMED');
+  const redeem = redeems.find((e) => e.detail.stage !== 'quote') ?? redeems[0];
   const identity = events.find((e) => e.kind === 'IDENTITY_CAPTURED' || e.kind === 'NETWORK_MATCH');
   const network = events.find((e) => e.kind === 'NETWORK_MATCH');
   const held = events.find((e) => e.kind === 'ORDER_HELD');
   const leaked = events.some((e) => e.kind === 'DECOY_LEAKED');
-  const product = Object.keys(detail.decoys?.fakeFloorCents ?? {})[0];
+  const floorOrder = detail.orders.map((o) => parseFloorCode(o.codeUsed)).find(Boolean);
+  const product = floorOrder?.productId ?? Object.keys(detail.decoys?.fakeFloorCents ?? {})[0];
   const toolCalls = items.filter((it) => it.kind === 'msg' && it.m.role === 'tool' && it.t <= now && detail.decoys?.honeyTools.includes(it.m.toolName ?? ''));
 
   return (
@@ -313,10 +325,10 @@ function ConsoleView({ detail, items, now }: { detail: SessionDetailRes; items: 
           </ul>
         </div>
         <div className="dc-right">
-          {redeem && typeof redeem.detail.decoyCode === 'string' && (
+          {redeem && (
             <div className="dc-card dc-spot tone-honey">
-              <span className="c-kicker">🔔 Code traced</span>
-              <CodeDecode code={redeem.detail.decoyCode} sourceSessionId={String(redeem.detail.sourceSessionId ?? '')} valid={redeem.detail.signatureValid !== false} />
+              <span className="c-kicker">🔔 {redeem.detail.decoyKind === 'fake_floor' ? 'Fake floor price traced' : 'Code traced'}</span>
+              <RedemptionTrace e={redeem} />
             </div>
           )}
           {identity && (

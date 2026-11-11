@@ -210,6 +210,7 @@
 .store-promise p { color: var(--muted); font-size: 14.5px; }
 .store-foot { padding: 28px clamp(20px, 4vw, 56px) 120px; font-size: 13px; color: var(--muted); }
 .store-error { color: #b3261e; }
+.store-notice { background: var(--bg-2); border-bottom: 1px solid var(--line); padding: 10px clamp(20px, 4vw, 56px); font-size: 14.5px; font-weight: 600; }
 
 /* drawer */
 .drawer-scrim { position: fixed; inset: 0; background: rgba(10, 10, 10, 0.35); opacity: 0; pointer-events: none; transition: opacity 0.25s ease; z-index: 40; }
