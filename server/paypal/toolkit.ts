@@ -21,6 +21,7 @@
 // tools' zod parsing. That's deliberate: our args are complete, and list_transactions needs `fields`
 // (to get payer_info), which its zod schema would strip; its handler fills the 31-day range itself.
 import { PayPalAgentToolkit } from '@paypal/agent-toolkit/ai-sdk';
+import type { PayerHistoryRes } from '../../shared/api';
 import { assertSandboxBase, centsToValue, valueToCents, type PayPalOrder, type RefundResult } from './client';
 
 export type ToolkitMethod = 'get_order' | 'create_refund' | 'list_transactions';
@@ -95,9 +96,13 @@ export function createToolkitRunner(opts: ToolkitOptions): ToolkitRunner {
       } catch {
         throw new ToolkitError(method, 'unparseable result');
       }
-      if (data && typeof data === 'object' && 'error' in data && data.error) {
-        const msg = typeof data.error === 'string' ? data.error : (data.error.message ?? JSON.stringify(data.error));
-        throw new ToolkitError(method, String(msg).slice(0, 300));
+      // Two failure shapes: { error: {message} } and the toolkit's error object { ok:false, status, code, message }.
+      if (data && typeof data === 'object' && (data.error || data.ok === false)) {
+        const e = data.error;
+        const msg = e
+          ? (typeof e === 'string' ? e : (e.message ?? JSON.stringify(e)))
+          : [data.status, data.code, data.message].filter((x) => x !== undefined && x !== '').join(' ');
+        throw new ToolkitError(method, String(msg || 'request failed').slice(0, 300));
       }
       return data;
     },
@@ -120,12 +125,7 @@ export async function executeRefund(runner: ToolkitRunner, o: { captureId: strin
   return { id: data.id, status: data.status };
 }
 
-export interface PayerHistory {
-  payerId: string;
-  source: 'paypal-agent-toolkit:list_transactions';
-  transactions: { transactionId: string; date?: string; amountCents?: number; currency?: string; status?: string; eventCode?: string }[];
-  error?: string;
-}
+export type PayerHistory = PayerHistoryRes;
 
 /** Last 31 days of this merchant's transactions with this payer. Best effort: never throws. */
 export async function getPayerHistory(runner: ToolkitRunner, payerId: string): Promise<PayerHistory> {

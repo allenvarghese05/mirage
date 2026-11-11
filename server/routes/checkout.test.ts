@@ -420,3 +420,76 @@ describe('fake floor quotes (A accepts an offer equal to a planted fake floor)',
     expect(d.events).toHaveLength(0);
   });
 });
+
+describe('merge-review fixes', () => {
+  it('DECOY_REDEEMED carries stage: checkout', async () => {
+    await checkout({ sessionId: 's1', items: [{ productId: 'np-jacket', qty: 1 }], code: 'NP-STAFF-00A7-K9MD' });
+    expect(d.events.find((e) => e.kind === 'DECOY_REDEEMED')!.detail.stage).toBe('checkout');
+  });
+
+  it('a PayPal outage at createOrder never loses the redemption event', async () => {
+    d.pp.createOrder = async () => { throw new Error('PayPal down'); };
+    const r = await checkout({ sessionId: 's1', items: [{ productId: 'np-jacket', qty: 1 }], code: 'NP-STAFF-00A7-K9MD' });
+    expect(r.status).toBeGreaterThanOrEqual(500);
+    const ev = d.events.find((e) => e.kind === 'DECOY_REDEEMED')!;
+    expect(ev.detail).toMatchObject({ decoyCode: 'NP-STAFF-00A7-K9MD', stage: 'checkout', orderError: 'PayPal down' });
+    expect(ev.detail.orderId).toBeUndefined();
+  });
+
+  it('rejects simulatedPayer with bad field types (400)', async () => {
+    const id = (await checkout({ sessionId: 's1', items: [{ productId: 'np-jacket', qty: 1 }] })).body.orderId;
+    expect((await approved(id, { sessionId: 's1', simulatedPayer: 'dev' })).status).toBe(400);
+    expect((await approved(id, { sessionId: 's1', simulatedPayer: { payerId: 42 } })).status).toBe(400);
+    expect((await approved(id, { sessionId: 's1', simulatedPayer: { payerId: 'P1', name: { first: 'x' } } })).status).toBe(400);
+    expect((await approved(id, { sessionId: 's1', simulatedPayer: { payerId: 'P1', email: 'a@example.com' } })).status).toBe(200);
+  });
+
+  it('baseline: the real staff code does not stack on an agreed quote (better of the two)', async () => {
+    d.db.prepare("INSERT INTO quotes VALUES ('base1', 'np-jacket', 8000, 'now'), ('base1', 'np-boots', 6000, 'now')").run();
+    const r = await checkout({ sessionId: 'base1', items: [{ productId: 'np-jacket', qty: 1 }, { productId: 'np-boots', qty: 1 }], code: 'NP-CREW-2291' });
+    // jacket: staff 5700 beats quote 8000; boots: quote 6000 beats staff 8400
+    expect(r.body.totalCents).toBe(5700 + 6000);
+    expect(r.body.discountLabel).toBe('Staff pricing (40% off)');
+  });
+
+  it('baseline: no staff label when every agreed quote already beats the staff price', async () => {
+    d.db.prepare("INSERT INTO quotes VALUES ('base1', 'np-jacket', 5000, 'now')").run();
+    const r = await checkout({ sessionId: 'base1', items: [{ productId: 'np-jacket', qty: 1 }], code: 'NP-CREW-2291' });
+    expect(r.body.totalCents).toBe(5000);
+    expect(r.body.discountLabel).toBeUndefined();
+  });
+
+  describe('review release is merchant-only', () => {
+    async function held() {
+      const id = (await checkout({ sessionId: 's1', items: [{ productId: 'np-jacket', qty: 1 }], code: 'NP-STAFF-00A7-K9MD' })).body.orderId as string;
+      d.pp.approve(id, DEV);
+      await approved(id, { sessionId: 's1' });
+      return id;
+    }
+    const review = (id: string, body: object, headers: Record<string, string> = {}) => {
+      let r = request(app).post(`/api/dashboard/review/${id}`);
+      for (const [k, v] of Object.entries(headers)) r = r.set(k, v);
+      return r.send(body);
+    };
+
+    it('refuses release from a proxied (non-loopback) client without the admin token', async () => {
+      const id = await held();
+      const r = await review(id, { decision: 'release' }, { 'X-Forwarded-For': '203.0.113.9' });
+      expect(r.status).toBe(403);
+      expect(d.pp.captures).toHaveLength(0);
+    });
+
+    it('allows release with the right admin token, refuses a wrong one', async () => {
+      d.config.adminToken = 'tok-123';
+      const id = await held();
+      expect((await review(id, { decision: 'release' }, { 'X-Forwarded-For': '203.0.113.9', 'x-mirage-admin': 'nope' })).status).toBe(403);
+      expect((await review(id, { decision: 'release' }, { 'X-Forwarded-For': '203.0.113.9', 'x-mirage-admin': 'tok-123' })).status).toBe(200);
+      expect(d.pp.captures).toHaveLength(1);
+    });
+
+    it('cancel stays open', async () => {
+      const id = await held();
+      expect((await review(id, { decision: 'cancel' }, { 'X-Forwarded-For': '203.0.113.9' })).status).toBe(200);
+    });
+  });
+});

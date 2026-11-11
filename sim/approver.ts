@@ -12,11 +12,16 @@
 // The caller must still confirm with the REST API (getOrder → APPROVED); this only drives the page.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { config } from '../server/config';
 
 export const SANDBOX_WEB_HOST = 'www.sandbox.paypal.com';
 
 export interface SandboxBuyer { email: string; password: string }
-export interface ApproveOptions { headless?: boolean; timeoutMs?: number; screenshotDir?: string }
+export interface ApproveOptions {
+  headless?: boolean; timeoutMs?: number; screenshotDir?: string;
+  /** Approval counts only if PayPal redirects here (same origin, path prefix). Default config.publicBaseUrl. */
+  expectedReturnPrefix?: string;
+}
 export interface ApproveResult { approved: boolean; returnedTo?: string; steps: string[]; error?: string; screenshot?: string }
 
 export function assertSandboxApproveUrl(url: string): void {
@@ -35,6 +40,19 @@ export function isAllowedNavigation(url: string): boolean {
   try {
     const u = new URL(url);
     return u.protocol === 'https:' && u.hostname === SANDBOX_WEB_HOST;
+  } catch {
+    return false;
+  }
+}
+
+/** Same origin as `prefix`, and the path starts with prefix's path. */
+export function isExpectedReturn(url: string, prefix: string): boolean {
+  try {
+    const u = new URL(url);
+    const p = new URL(prefix);
+    if (u.origin !== p.origin) return false;
+    const base = p.pathname.replace(/\/+$/, '');
+    return base === '' || u.pathname === base || u.pathname.startsWith(`${base}/`);
   } catch {
     return false;
   }
@@ -64,6 +82,7 @@ export async function approveInSandbox(approveUrl: string, buyer: SandboxBuyer, 
   }
   const { chromium } = await import('playwright');
   const timeoutMs = opts.timeoutMs ?? 120_000;
+  const expectedReturn = opts.expectedReturnPrefix ?? config.publicBaseUrl;
   const steps: string[] = [];
   let returnedTo: string | undefined;
 
@@ -139,6 +158,9 @@ export async function approveInSandbox(approveUrl: string, buyer: SandboxBuyer, 
     }
 
     if (!returnedTo) throw new Error(`no redirect back from PayPal within ${Math.round(timeoutMs / 1000)}s`);
+    if (!isExpectedReturn(returnedTo, expectedReturn)) {
+      throw new Error(`PayPal navigated to ${new URL(returnedTo).origin}, not the expected return URL; not treating this as an approval`);
+    }
     return { approved: true, returnedTo, steps };
   } catch (e) {
     let screenshot: string | undefined;

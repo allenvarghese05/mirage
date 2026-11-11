@@ -20,6 +20,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { DecoyKind, TripEvent } from '../../shared/types';
 import { config } from '../config';
+import { readAdminToken } from './admin';
 import { createPayPalClient, type PayPalApi } from './client';
 import { createFakePayPal, type FakePayPal } from './fake';
 import { createToolkitRunner, type ToolkitRunner } from './toolkit';
@@ -38,6 +39,8 @@ export interface PaypalLayerConfig {
   publicBaseUrl: string;
   production: boolean;
   hasPaypalKeys: boolean;
+  /** MIRAGE_ADMIN_TOKEN: lets a non-loopback merchant release held orders. Empty = loopback only. */
+  adminToken: string;
 }
 
 export interface PaypalLayerDeps {
@@ -83,6 +86,7 @@ function defaults(): PaypalLayerDeps {
       publicBaseUrl: config.publicBaseUrl,
       production: process.env.NODE_ENV === 'production',
       hasPaypalKeys: Boolean(config.paypal.clientId && config.paypal.clientSecret),
+      adminToken: readAdminToken(),
     },
   };
 }

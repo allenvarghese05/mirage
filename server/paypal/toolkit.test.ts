@@ -89,3 +89,11 @@ describe('per-call idempotency key', () => {
     expect(seen).toEqual([undefined, 'mirage-refund-rf1']);
   });
 });
+
+describe('toolkit failure shapes', () => {
+  it('treats {ok:false, status, code, message} as a failure with PayPal\'s message', async () => {
+    const f = fakeTools({ create_refund: () => ({ ok: false, status: 422, code: 'UNPROCESSABLE_ENTITY', message: 'CAPTURE_FULLY_REFUNDED' }) });
+    const runner = createToolkitRunner({ tools: () => f.tools });
+    await expect(executeRefund(runner, { captureId: 'CAP1' })).rejects.toThrow(/CAPTURE_FULLY_REFUNDED/);
+  });
+});

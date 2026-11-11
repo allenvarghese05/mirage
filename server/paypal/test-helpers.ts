@@ -64,7 +64,7 @@ export function makeTestDeps(cfg: Partial<PaypalLayerConfig> = {}): TestDeps {
     simPaypal: () => sim,
     config: {
       sim: false, merchantId: 'MERCH1', webhookId: '', publicBaseUrl: 'http://localhost:5173',
-      production: false, hasPaypalKeys: true, ...cfg,
+      production: false, hasPaypalKeys: true, adminToken: '', ...cfg,
     },
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { approveInSandbox, assertSandboxApproveUrl, isAllowedNavigation } from './approver';
+import { approveInSandbox, assertSandboxApproveUrl, isAllowedNavigation, isExpectedReturn } from './approver';
 
 describe('assertSandboxApproveUrl', () => {
   it('accepts PayPal sandbox approval links', () => {
@@ -32,5 +32,16 @@ describe('approveInSandbox guards', () => {
   });
   it('refuses to run without sandbox buyer credentials', async () => {
     await expect(approveInSandbox('https://www.sandbox.paypal.com/checkoutnow?token=X', { email: '', password: '' })).rejects.toThrow(/SANDBOX_BUYER/);
+  });
+});
+
+describe('isExpectedReturn', () => {
+  it('requires the same origin and path prefix as the expected return base', () => {
+    expect(isExpectedReturn('http://localhost:5173/store/northpeak?checkout=return&token=X', 'http://localhost:5173')).toBe(true);
+    expect(isExpectedReturn('https://mirage.onrender.com/store/x?checkout=return', 'https://mirage.onrender.com/')).toBe(true);
+    expect(isExpectedReturn('http://localhost:5173.evil.example/store', 'http://localhost:5173')).toBe(false);
+    expect(isExpectedReturn('https://www.paypal.com/signin', 'http://localhost:5173')).toBe(false);
+    expect(isExpectedReturn('http://localhost:5173/other', 'http://localhost:5173/store')).toBe(false);
+    expect(isExpectedReturn('not a url', 'http://localhost:5173')).toBe(false);
   });
 });
