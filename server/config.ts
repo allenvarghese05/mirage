@@ -35,7 +35,7 @@ export const config = {
   anthropicKey: get('ANTHROPIC_API_KEY'),
   models: {
     storeAgent: get('MIRAGE_STORE_MODEL', 'claude-haiku-5-5'),
-    attacker: get('MIRAGE_ATTACKER_MODEL', 'claude-sonnet-5-5'),
+    attacker: get('MIRAGE_ATTACKER_MODEL', 'claude-haiku-5-5'),
     honest: get('MIRAGE_HONEST_MODEL', 'claude-haiku-5-5'),
     classifier: get('MIRAGE_CLASSIFIER_MODEL', 'claude-haiku-5-5'),
   },
