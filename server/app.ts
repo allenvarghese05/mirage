@@ -5,6 +5,16 @@ import { checkoutRouter } from './routes/checkout';
 import { webhookRouter } from './routes/webhook';
 import { chatRouter } from './routes/chat';
 import { dashboardRouter } from './routes/dashboard';
+import { getDb } from './db';
+import { traceCode, isTrappedQuote } from './mirage/decoys';
+import { emit } from './mirage/tripwire';
+import { setPaypalDeps } from './paypal/deps';
+
+/** Wire workstream B (paypal-layer) to workstream A's data layer, decoys and tripwire bus.
+ *  Pass getDb itself (not getDb()) so resetDb() in tests is picked up. */
+export function wirePaypalLayer(): void {
+  setPaypalDeps({ getDb, traceCode, emit, isTrappedQuote });
+}
 
 export const DEV_DECOY_SECRET = 'dev-only-insecure-decoy-secret-change-me';
 
@@ -24,6 +34,7 @@ export function startupProblems(cfg: typeof appConfig, nodeEnv = process.env.NOD
 }
 
 export function createApp(): express.Express {
+  wirePaypalLayer();
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);

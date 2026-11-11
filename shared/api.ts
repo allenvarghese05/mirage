@@ -97,7 +97,14 @@ export type ReviewRes = PublicOrderStatus;
 // GET /api/dashboard/scoreboard?batchId=
 export type ScoreboardRes = { batchId: string | null; runs: SimRun[]; summary: ScoreboardSummary[] };
 
-// GET /api/dashboard/payers/:payerId/history   (PayPal Agent Toolkit list_transactions + local orders; shape owned by B)
+// GET /api/dashboard/payers/:payerId/history   (PayPal Agent Toolkit list_transactions; shape owned by B)
+// Best effort: on failure `transactions` is [] and `error` says why (e.g. keys missing, Transaction Search not enabled).
+export type PayerHistoryRes = {
+  payerId: string;
+  source: 'paypal-agent-toolkit:list_transactions';
+  transactions: { transactionId: string; date?: string; amountCents?: number; currency?: string; status?: string; eventCode?: string }[];
+  error?: string;
+};
 
 // POST /api/dashboard/sim-runs
 export type SimRunsReq = { runs: SimRun[] };

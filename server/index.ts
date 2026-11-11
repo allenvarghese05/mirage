@@ -6,6 +6,8 @@ import { config } from './config';
 import { createApp, startupProblems } from './app';
 import { getDb } from './db';
 import { fakeLlmEnabled } from './agent/llm';
+import { registerRefundExecutor } from './mirage/policy';
+import { paypalRefundExecutor } from './paypal/refunds';
 
 // Hard rule 2 (sandbox only) and a real decoy secret in production.
 const problems = startupProblems(config);
@@ -17,6 +19,8 @@ if (problems.fatal.length) {
 
 getDb();
 const app = createApp();
+// Honest policy refunds run on PayPal's Agent Toolkit (runtime only; unit tests never reach the toolkit).
+registerRefundExecutor(paypalRefundExecutor);
 
 if (process.env.NODE_ENV === 'production') {
   const webDir = resolve(process.cwd(), 'dist/web');

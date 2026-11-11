@@ -1,13 +1,59 @@
-// STUB owned by workstream B (paypal-layer). B replaces this file; keep the export name `checkoutRouter`.
-// Real implementation: POST /api/checkout, POST /api/checkout/:orderId/approved, GET /api/orders/:orderId/status,
-// POST /api/dashboard/review/:orderId (capture-capable). Paths are full (mounted at the app root).
-import { Router } from 'express';
+// Checkout routes (Workstream B). Paths are absolute: mount with app.use(checkoutRouter).
+//   POST /api/checkout
+//   POST /api/checkout/:orderId/approved
+//   GET  /api/orders/:orderId/status
+//   POST /api/dashboard/review/:orderId           (release: merchant only; see server/paypal/admin.ts)
+//   GET  /api/dashboard/payers/:payerId/history   (PayPal history via the Agent Toolkit; not yet in shared/api.ts)
+import express, { Router, type NextFunction, type Request, type Response } from 'express';
+import { isMerchantRequest } from '../paypal/admin';
+import { getPaypalDeps, type PaypalLayerDeps } from '../paypal/deps';
+import { approve, checkout, HttpError, MESSAGES, orderStatus, review } from '../paypal/orders';
+import { getPayerHistory, type PayerHistory } from '../paypal/toolkit';
 
-export const checkoutRouter = Router();
+export { MESSAGES };
 
-const notReady = (_req: unknown, res: { status: (n: number) => { json: (b: unknown) => void } }) => {
-  res.status(501).json({ error: 'checkout is not wired yet (paypal-layer)' });
-};
-checkoutRouter.post('/api/checkout', notReady);
-checkoutRouter.post('/api/checkout/:orderId/approved', notReady);
-checkoutRouter.get('/api/orders/:orderId/status', notReady);
+type Handler = (req: Request, deps: PaypalLayerDeps) => Promise<unknown> | unknown;
+
+export function createCheckoutRouter(getDeps: () => PaypalLayerDeps = getPaypalDeps): Router {
+  const r = Router();
+  const json = express.json({ limit: '100kb' });
+
+  const handle = (fn: Handler) => async (req: Request, res: Response, _next: NextFunction) => {
+    try {
+      res.json(await fn(req, getDeps()));
+    } catch (e) {
+      if (e instanceof HttpError) {
+        res.status(e.status).json(e.body ?? { error: e.message, message: e.message });
+        return;
+      }
+      console.error('[checkout]', (e as Error).message);
+      res.status(500).json({ error: 'Something went wrong. You have not been charged.' });
+    }
+  };
+
+  r.post('/api/checkout', json, handle((req, deps) => checkout(deps, req.body, {
+    ip: req.ip,
+    userAgent: req.get('user-agent'),
+    wantsRealPaypal: req.get('x-mirage-real-paypal') === '1',
+  })));
+  r.post('/api/checkout/:orderId/approved', json, handle((req, deps) => approve(deps, String(req.params.orderId), req.body)));
+  r.get('/api/orders/:orderId/status', handle((req, deps) => orderStatus(deps, String(req.params.orderId))));
+  r.post('/api/dashboard/review/:orderId', json, handle((req, deps) => {
+    // Release captures money: merchant only (loopback, or x-mirage-admin token). Cancel moves no money.
+    if (req.body?.decision === 'release' && !isMerchantRequest(req, deps.config.adminToken)) {
+      throw new HttpError(403, 'Releasing a held order is merchant-only (local dashboard or admin token)');
+    }
+    return review(deps, String(req.params.orderId), req.body);
+  }));
+  r.get('/api/dashboard/payers/:payerId/history', handle(async (req, deps): Promise<PayerHistory> => {
+    const payerId = String(req.params.payerId);
+    try {
+      return await getPayerHistory(deps.toolkit(), payerId);
+    } catch (e) {
+      return { payerId, source: 'paypal-agent-toolkit:list_transactions', transactions: [], error: (e as Error).message };
+    }
+  }));
+  return r;
+}
+
+export const checkoutRouter = createCheckoutRouter();
