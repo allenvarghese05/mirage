@@ -77,3 +77,15 @@ describe('toolkit calls', () => {
     expect(built).toBe(2);
   });
 });
+
+describe('per-call idempotency key', () => {
+  it('builds a dedicated toolkit carrying the PayPal-Request-Id for that call only', async () => {
+    const seen: (string | undefined)[] = [];
+    const runner = createToolkitRunner({
+      tools: (ctx) => { seen.push(ctx?.requestId); return fakeTools({ create_refund: () => ({ id: 'R', status: 'COMPLETED' }) }).tools; },
+    });
+    await executeRefund(runner, { captureId: 'CAP1', amountCents: 100, requestId: 'mirage-refund-rf1' });
+    await executeRefund(runner, { captureId: 'CAP1', amountCents: 100 });
+    expect(seen).toEqual([undefined, 'mirage-refund-rf1']);
+  });
+});

@@ -8,8 +8,8 @@
 // What stays on the REST client (server/paypal/client.ts), and why:
 //   create order  — the toolkit's create_order can't send PayPal-Client-Metadata-Id, a per-call
 //                   PayPal-Request-Id, or our custom_id, and those tie the order to the chat session.
-//   capture       — needs a per-call PayPal-Request-Id (idempotency) so a replay never double-charges;
-//                   the toolkit only supports one fixed request_id per toolkit instance.
+//   capture       — must be idempotent per order and is on the hot checkout path; the toolkit only takes
+//                   a request_id per toolkit instance (we do build one per refund, below, but not per capture).
 //   approval read — checkout uses the REST getOrder so the fake PayPal and SIM- orders share one code
 //                   path; get_order here is the same API call for dashboard use.
 //   webhook verify, risk context (STC) — not offered by the toolkit.
@@ -34,7 +34,8 @@ export class ToolkitError extends Error {
 }
 
 export interface ToolkitRunner {
-  run(method: ToolkitMethod, args: Record<string, unknown>): Promise<any>;
+  /** requestId: sent as PayPal-Request-Id via a toolkit instance built for this one call (idempotent money calls). */
+  run(method: ToolkitMethod, args: Record<string, unknown>, opts?: { requestId?: string }): Promise<any>;
   methods(): string[];
 }
 
@@ -43,7 +44,7 @@ export interface ToolkitOptions {
   clientSecret?: string;
   base?: string;
   /** Tests: supply tools instead of building the real toolkit. */
-  tools?: () => ToolkitTools;
+  tools?: (ctx: { requestId?: string }) => ToolkitTools;
   maxAgeMs?: number;
   now?: () => number;
 }
@@ -54,10 +55,11 @@ const ACTIONS = {
   transactions: { list: true },
 };
 
-function buildRealTools(clientId: string, clientSecret: string): ToolkitTools {
+function buildRealTools(clientId: string, clientSecret: string, requestId?: string): ToolkitTools {
   const toolkit = new PayPalAgentToolkit({
     clientId, clientSecret,
-    configuration: { actions: ACTIONS, context: { sandbox: true } },
+    // The toolkit sends context.request_id as PayPal-Request-Id on every call of this instance.
+    configuration: { actions: ACTIONS, context: requestId ? { sandbox: true, request_id: requestId } : { sandbox: true } },
   });
   return toolkit.getTools() as unknown as ToolkitTools;
 }
@@ -67,15 +69,15 @@ export function createToolkitRunner(opts: ToolkitOptions): ToolkitRunner {
     assertSandboxBase(opts.base ?? 'https://api-m.sandbox.paypal.com');
     if (!opts.clientId || !opts.clientSecret) throw new Error('Missing PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (fill .secrets/dev.keys)');
   }
-  const make = opts.tools ?? (() => buildRealTools(opts.clientId!, opts.clientSecret!));
+  const make = opts.tools ?? ((ctx: { requestId?: string }) => buildRealTools(opts.clientId!, opts.clientSecret!, ctx.requestId));
   const maxAge = opts.maxAgeMs ?? 8 * 60 * 60 * 1000;
   const now = opts.now ?? Date.now;
-  let tools = make();
+  let tools = make({});
   let builtAt = now();
 
   const current = () => {
     if (now() - builtAt >= maxAge) {
-      tools = make();
+      tools = make({});
       builtAt = now();
     }
     return tools;
@@ -83,8 +85,8 @@ export function createToolkitRunner(opts: ToolkitOptions): ToolkitRunner {
 
   return {
     methods: () => Object.keys(current()),
-    async run(method, args) {
-      const t = current()[method];
+    async run(method, args, o = {}) {
+      const t = (o.requestId ? make({ requestId: o.requestId }) : current())[method];
       if (!t?.execute) throw new ToolkitError(method, 'tool not enabled');
       const raw = await t.execute(args, { toolCallId: `mirage-${method}`, messages: [] });
       let data: any;
@@ -107,14 +109,14 @@ export async function toolkitGetOrder(runner: ToolkitRunner, orderId: string): P
 }
 
 /**
- * Refund a capture through the toolkit. The toolkit can't set a per-call PayPal-Request-Id, so callers
- * must guard against repeats themselves (the `refunds.executed` flag), and must never retry blindly.
+ * Refund a capture through the toolkit. Pass requestId (stable per refund) so a retry can't refund twice:
+ * PayPal returns the original refund for a repeated PayPal-Request-Id.
  */
-export async function executeRefund(runner: ToolkitRunner, o: { captureId: string; amountCents?: number; note?: string }): Promise<RefundResult> {
+export async function executeRefund(runner: ToolkitRunner, o: { captureId: string; amountCents?: number; note?: string; requestId?: string }): Promise<RefundResult> {
   const args: Record<string, unknown> = { capture_id: o.captureId };
   if (o.amountCents !== undefined) args.amount = { currency_code: 'USD', value: centsToValue(o.amountCents) };
   if (o.note) args.note_to_payer = o.note.slice(0, 255);
-  const data = await runner.run('create_refund', args);
+  const data = await runner.run('create_refund', args, { requestId: o.requestId });
   return { id: data.id, status: data.status };
 }
 
