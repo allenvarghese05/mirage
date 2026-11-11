@@ -1,4 +1,5 @@
-// Loads config from process.env, then fills gaps from .secrets/dev.keys (KEY=VALUE lines).
+// Loads config from .secrets/dev.keys (KEY=VALUE lines) first, then process.env as fallback.
+// The project file wins so a stray shell variable (e.g. ANTHROPIC_API_KEY) can never override the key chosen for Mirage.
 // Never log values. Never send them to the browser.
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -15,7 +16,7 @@ function loadKeysFile(): Record<string, string> {
 }
 
 const file = loadKeysFile();
-const get = (k: string, fallback = ''): string => process.env[k] ?? file[k] ?? fallback;
+const get = (k: string, fallback = ''): string => file[k] ?? process.env[k] ?? fallback;
 
 export const config = {
   port: Number(get('PORT', '8787')),
@@ -33,9 +34,12 @@ export const config = {
     { email: get('SANDBOX_BUYER2_EMAIL'), password: get('SANDBOX_BUYER2_PASSWORD') },
   ].filter((b) => b.email),
   anthropicKey: get('ANTHROPIC_API_KEY'),
+  /** Hard cap on total Claude API spend across ALL Mirage processes (ledger in data/llm-spend.jsonl). */
+  llmBudgetUsd: Number(get('MIRAGE_LLM_BUDGET_USD', '5')),
+  llmLedgerPath: get('MIRAGE_LLM_LEDGER', 'data/llm-spend.jsonl'),
   models: {
     storeAgent: get('MIRAGE_STORE_MODEL', 'claude-haiku-5-5'),
-    attacker: get('MIRAGE_ATTACKER_MODEL', 'claude-sonnet-5-5'),
+    attacker: get('MIRAGE_ATTACKER_MODEL', 'claude-haiku-5-5'),
     honest: get('MIRAGE_HONEST_MODEL', 'claude-haiku-5-5'),
     classifier: get('MIRAGE_CLASSIFIER_MODEL', 'claude-haiku-5-5'),
   },
