@@ -1,0 +1,100 @@
+{
+  "run_id": "719d7890",
+  "finished_at": "2026-11-05T16:37:08.941Z",
+  "environment": "api-m.sandbox.paypal.com",
+  "ids": {
+    "app_id": "APP-7YU6439084598392F",
+    "orderId": "2EP38753TE421403K",
+    "authId": "0DS43084AN350784D",
+    "cap1": "1W0976180K414950K",
+    "cap2": "3B455651SE952621W",
+    "refund": "3WF82074RC818840C"
+  },
+  "flags": {
+    "patchBeforeApproval": true,
+    "chargedPriceMatchesShownPrice": true,
+    "idempotentReplay": true,
+    "multiplePartialCaptures": true,
+    "overCaptureRejected": true,
+    "partialRefund": true,
+    "voidAfterPartialCapture": true
+  },
+  "fees": [
+    {
+      "capture": "1W0976180K414950K",
+      "gross": "40.00",
+      "fee": "1.89",
+      "net": "38.11",
+      "fee_percent": "4.72"
+    },
+    {
+      "capture": "3B455651SE952621W",
+      "gross": "30.00",
+      "fee": "1.54",
+      "net": "28.46",
+      "fee_percent": "5.13"
+    }
+  ],
+  "results": [
+    {
+      "name": "1. OAuth token",
+      "status": "PASS",
+      "detail": "token OK (app APP-7YU6439084598392F)"
+    },
+    {
+      "name": "2. Create AUTHORIZE order with policy hash in custom_id",
+      "status": "PASS",
+      "detail": "order 2EP38753TE421403K, status PAYER_ACTION_REQUIRED, custom_id 68 chars (max 255)"
+    },
+    {
+      "name": "3. PATCH price before approval ($100.00 -> $85.00)",
+      "status": "PASS",
+      "detail": "order now shows $85.00"
+    },
+    {
+      "name": "4. Buyer approves in PayPal (YOU do this)",
+      "status": "PASS",
+      "detail": "order status APPROVED"
+    },
+    {
+      "name": "5. Authorize the order (place the hold)",
+      "status": "PASS",
+      "detail": "auth 0DS43084AN350784D, status CREATED, amount $85.00 (matches the price shown), valid ~29 days, custom_id on unit: preserved"
+    },
+    {
+      "name": "6. Partial capture #1 ($40.00, final_capture:false)",
+      "status": "PASS",
+      "detail": "capture 1W0976180K414950K, status COMPLETED; gross $40.00, PayPal fee $1.89 (4.72%), net $38.11; custom_id preserved"
+    },
+    {
+      "name": "7. Replay capture #1 with the SAME PayPal-Request-Id (idempotency)",
+      "status": "PASS",
+      "detail": "same capture id returned, order still has exactly 1 capture"
+    },
+    {
+      "name": "8. Partial capture #2 ($30.00) - the multi-capture test",
+      "status": "PASS",
+      "detail": "capture 3B455651SE952621W, status COMPLETED; gross $30.00, PayPal fee $1.54 (5.13%), net $28.46"
+    },
+    {
+      "name": "9. Over-capture ($500.00 on a $85.00 hold) must be rejected",
+      "status": "PASS",
+      "detail": "rejected: HTTP 422 MAX_CAPTURE_AMOUNT_EXCEEDED"
+    },
+    {
+      "name": "10. Partial refund of capture #1 ($5.00)",
+      "status": "PASS",
+      "detail": "refund 3WF82074RC818840C, status COMPLETED"
+    },
+    {
+      "name": "11. Void the unused remainder of the hold",
+      "status": "PASS",
+      "detail": "status PARTIALLY_CAPTURED -> VOIDED; about $15.00 of the hold released"
+    },
+    {
+      "name": "12. Final read-back of the order",
+      "status": "INFO",
+      "detail": "captures on the order: $40.00 PARTIALLY_REFUNDED, $30.00 COMPLETED"
+    }
+  ]
+}

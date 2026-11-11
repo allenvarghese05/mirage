@@ -1,0 +1,28 @@
+# Copy this file to .secrets/dev.keys and fill it in. SANDBOX / TEST VALUES ONLY.
+# .secrets/dev.keys is gitignored. Never put live PayPal keys here.
+
+# PayPal sandbox app (same values as ~/Downloads/paypal-spike/.env)
+PAYPAL_CLIENT_ID=
+PAYPAL_CLIENT_SECRET=
+PAYPAL_BASE=https://api-m.sandbox.paypal.com
+
+# Sandbox BUSINESS account's merchant ID (developer.paypal.com > Sandbox accounts > Business > View/edit > "Account ID")
+# Used for the risk-context (STC) attempt. Optional.
+PAYPAL_MERCHANT_ID=
+
+# Sandbox PERSONAL (buyer) test account #1, plays the attacker "Dev"
+SANDBOX_BUYER_EMAIL=
+SANDBOX_BUYER_PASSWORD=
+
+# Sandbox PERSONAL (buyer) test account #2, plays an honest customer. Optional but recommended.
+SANDBOX_BUYER2_EMAIL=
+SANDBOX_BUYER2_PASSWORD=
+
+# Anthropic API key (store agent, attacker agents, honest-customer agents)
+ANTHROPIC_API_KEY=
+
+# Optional: Discord channel webhook URL for live alarm notifications
+DISCORD_WEBHOOK_URL=
+
+# HMAC key for self-tracing decoy codes. Any long random string.
+MIRAGE_DECOY_SECRET=

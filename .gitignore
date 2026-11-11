@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.secrets/*
+!.secrets/dev.keys.example
+.env
+.env.*
+*.sqlite
+*.sqlite-*
+data/
+test-results/
+playwright-report/
+.DS_Store
