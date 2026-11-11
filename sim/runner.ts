@@ -99,7 +99,17 @@ export async function runOne(plan: RunPlan, deps: RunDeps): Promise<RunRecord> {
 
     turns: for (let turn = 1; turn <= maxTurns; turn++) {
       if (meter.exceeded) { rec.endReason = 'budget_abort'; break; }
-      const r = await brain.next({ agentReply: reply, turn, maxTurns });
+      let r;
+      try {
+        r = await brain.next({ agentReply: reply, turn, maxTurns });
+      } catch (e) {
+        // The sim's own LLM failed: not the store's fault, so the run is excluded rather than scored.
+        const status = (e as { status?: number }).status;
+        rec.endReason = 'persona_error';
+        rec.error = `persona LLM: ${errMsg(e)}`;
+        rec.fatal = status === 400 || status === 401 || status === 403;
+        break;
+      }
       if (r.usage) rec.personaUsage = addUsage(rec.personaUsage, r.usage);
       if (r.costUsd) { rec.costUsd.persona += r.costUsd; meter.addPersona(r.costUsd); }
       if (r.action.note) rec.notes.push(`t${turn}: ${r.action.note}`);
@@ -184,9 +194,11 @@ export interface BatchResult {
   posted: { ok: boolean; status: number; error?: string };
   file: string;
   aborted: boolean;
+  /** Why the batch stopped early because the persona LLM is unusable (bad key, usage limit). */
+  fatal?: string;
 }
 
-const EXCLUDED_REASONS = new Set(['persona_refused', 'budget_abort']);
+const EXCLUDED_REASONS = new Set(['persona_refused', 'persona_error', 'budget_abort']);
 const usd = (c: number) => `$${(c / 100).toFixed(2)}`;
 
 export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
@@ -198,6 +210,7 @@ export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
   const scored: { index: number; run: SimRun }[] = [];
   const excluded: Excluded[] = [];
   let aborted = false;
+  let fatal: string | undefined;
   let done = 0;
   let next = 0;
 
@@ -214,7 +227,9 @@ export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
   };
 
   async function score(plan: RunPlan, rec: RunRecord) {
-    if (EXCLUDED_REASONS.has(rec.endReason)) return void excluded.push({ runId: rec.runId, personaId: rec.personaId, reason: rec.endReason });
+    if (EXCLUDED_REASONS.has(rec.endReason)) {
+      return void excluded.push({ runId: rec.runId, personaId: rec.personaId, reason: rec.error ? `${rec.endReason}: ${rec.error}` : rec.endReason });
+    }
     if (!rec.sessionId) return void excluded.push({ runId: rec.runId, personaId: rec.personaId, reason: `error: ${rec.error}` });
     try {
       const detail = await opts.api.sessionDetail(rec.sessionId);
@@ -228,13 +243,14 @@ export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
 
   async function worker() {
     for (;;) {
-      if (opts.meter.exceeded) { aborted = true; return; }
+      if (opts.meter.exceeded || fatal) { aborted = true; return; }
       const i = next++;
       if (i >= plans.length) return;
       const plan = plans[i];
       const rec = await runOne(plan, opts);
       records.push(rec);
       if (rec.endReason === 'budget_abort') aborted = true;
+      if (rec.fatal && !fatal) fatal = rec.error;
       const run = await score(plan, rec);
       done++;
       const code = rec.checkout?.req.code ? ` code=${rec.checkout.req.code}` : '';
@@ -248,7 +264,8 @@ export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
   }
 
   await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.concurrency, plans.length)) }, worker));
-  if (aborted) log(`Budget exceeded: stopped after ${records.length}/${plans.length} runs. ${opts.meter.line()}`);
+  if (fatal) log(`Stopped after ${records.length}/${plans.length} runs: the persona LLM cannot be called (${fatal}).`);
+  else if (aborted) log(`Budget exceeded: stopped after ${records.length}/${plans.length} runs. ${opts.meter.line()}`);
 
   records.sort((a, b) => a.runId.localeCompare(b.runId));
   const runs = flush();
@@ -256,5 +273,5 @@ export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
     ? { ok: false, status: 0, error: 'not posted' }
     : await opts.api.postSimRuns(runs);
   flush(posted);
-  return { batchId: opts.batchId, records, simRuns: runs, summary: summarize(runs), excluded, posted, file, aborted };
+  return { batchId: opts.batchId, records, simRuns: runs, summary: summarize(runs), excluded, posted, file, aborted, fatal };
 }

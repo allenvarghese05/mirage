@@ -161,4 +161,19 @@ describe('runBatch', () => {
     expect(res.simRuns).toHaveLength(0);
     expect(res.excluded.map((e) => e.reason)).toEqual(['persona_refused', 'persona_refused']);
   });
+
+  it('excludes persona-LLM failures and stops the batch when the error cannot be retried', async () => {
+    const broken: BrainFactory = () => ({
+      next: async () => { throw Object.assign(new Error('You have reached your specified API usage limits.'), { status: 400 }); },
+    });
+    const res = await runBatch({
+      ...deps({ brainFactory: broken }), batchId: 'nokey', personas: resolvePersonas('normal_shopper'),
+      storeModes: ['mirage'], runsPerMode: 6, concurrency: 1, outDir,
+    });
+    expect(res.simRuns).toHaveLength(0);
+    expect(res.records).toHaveLength(1);
+    expect(res.aborted).toBe(true);
+    expect(res.fatal).toMatch(/usage limits/);
+    expect(res.excluded[0].reason).toMatch(/^persona_error: persona LLM: You have reached/);
+  });
 });

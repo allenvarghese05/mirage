@@ -17,6 +17,9 @@ Usage:
   npm run sim -- --batch <name> [options]
   npm run sim -- --scenario network [options]
 
+Exit codes: 0 ok, 1 network scenario failed, 2 bad arguments / server unreachable, 3 budget abort,
+            4 persona LLM unusable (bad key, usage limit).
+
 Options:
   --batch <name>          Batch id (default: batch-<timestamp>). Output: data/sim-runs-<batch>.json
   --runs <N>              Runs PER STORE MODE, spread round-robin over the personas (default 10).
@@ -187,7 +190,10 @@ async function main() {
   const errors = res.records.filter((r) => r.endReason === 'error').length;
   if (errors) console.log(`  ${errors} run(s) ended with an error (still scored); see records in the JSON file.`);
   console.log(`Wrote ${res.file} | posted to dashboard: ${res.posted.ok ? 'yes' : `no (${res.posted.error ?? res.posted.status})`} | ${meter.line()}`);
-  if (res.aborted) process.exitCode = 3;
+  if (res.fatal) {
+    console.log(`Persona LLM unusable: ${res.fatal}\n  Check ANTHROPIC_API_KEY / usage limits, or use --brain heuristic for a wiring check.`);
+    process.exitCode = 4;
+  } else if (res.aborted) process.exitCode = 3;
 }
 
 main().catch((e) => {

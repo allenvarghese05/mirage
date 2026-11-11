@@ -2,7 +2,8 @@
 import type { PayerIdentity, StoreId, StoreMode } from '../shared/types';
 import type { ApprovedRes, CheckoutReq, CheckoutRes, SessionDetailRes } from '../shared/api';
 
-export type EndReason = 'checkout' | 'leave' | 'max_turns' | 'persona_refused' | 'budget_abort' | 'error';
+/** 'persona_error' = the sim's own persona LLM failed (harness-side): excluded from the scoreboard. */
+export type EndReason = 'checkout' | 'leave' | 'max_turns' | 'persona_refused' | 'persona_error' | 'budget_abort' | 'error';
 
 export interface TranscriptTurn {
   role: 'shopper' | 'agent';
@@ -40,6 +41,8 @@ export interface RunRecord {
   checkout?: CheckoutAttempt;
   endReason: EndReason;
   error?: string;
+  /** Set with persona_error when retrying cannot help (HTTP 400/401/403, e.g. usage limit or bad key). */
+  fatal?: boolean;
   startedAt: string;
   finishedAt: string;
   /** Sessions whose decoys this run may redeem with "correct" attribution (its own session is always allowed). */
