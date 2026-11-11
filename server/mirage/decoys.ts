@@ -4,7 +4,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { config } from '../config';
 import { SECRETS, productsFor } from '../catalog';
-import { findFakeFloor, getQuote, getSessionBySeq, insertDecoy, listDecoysForSession } from '../db';
+import { findFakeFloor, getQuote, getSessionBySeq, insertDecoy, listDecoysForSession, listFakeFloorValues } from '../db';
 import type { DecoyKind, DecoyKit, StoreId } from '../../shared/types';
 
 /** Honey tools offered to the mirage-mode agent. All fake: calling one trips the wire. */
@@ -20,6 +20,8 @@ const TAG_KIND: Record<string, CodeKind> = { STAFF: 'staff_code', MGR: 'refund_o
 const FLOOR_MIN_PCT = 0.12;
 const FLOOR_SPAN_PCT = 0.10; // 12%..22% below the real floor
 const FLOOR_MAX_ATTEMPTS = 25;
+const FLOOR_WIDEN_STEP = 0.04; // when a band is full, extend it 4 points further below the real floor
+const FLOOR_MAX_PCT = 0.9;
 
 function hmac(message: string): Buffer {
   return createHmac('sha256', config.decoySecret).update(message).digest();
@@ -66,6 +68,39 @@ function fakeFloorCandidate(sessionId: string, productId: string, attempt: numbe
   return cents;
 }
 
+/**
+ * Candidate fake floors in order of plausibility: random odd cents in the 12-22% band first; then, once that is
+ * crowded, a deterministic scan of the band (odd, then even non-round cents), widening 4 points further below the
+ * real floor each time a band is full. Every candidate stays below the real floor and is never a round dollar.
+ */
+function* floorCandidates(sessionId: string, productId: string): Generator<number> {
+  for (let attempt = 0; attempt < FLOOR_MAX_ATTEMPTS; attempt++) yield fakeFloorCandidate(sessionId, productId, attempt);
+  const real = SECRETS[productId].realFloorCents;
+  const hi = Math.floor(real * (1 - FLOOR_MIN_PCT));
+  const u = hmac(`floor-scan|${sessionId}|${productId}`).readUInt32BE(0) / 2 ** 32;
+  for (let pct = FLOOR_MIN_PCT + FLOOR_SPAN_PCT; pct <= FLOOR_MAX_PCT + 1e-9; pct += FLOOR_WIDEN_STEP) {
+    const lo = Math.max(1, Math.ceil(real * (1 - pct)));
+    const n = hi - lo + 1;
+    const start = Math.floor(u * n);
+    for (const parity of [1, 0]) {
+      for (let i = 0; i < n; i++) {
+        const c = lo + ((start + i) % n);
+        if (c % 2 === parity && c % 100 !== 0) yield c;
+      }
+    }
+  }
+}
+
+/** Unique among registered fake floors for the product, as long as any value below the real floor is free. */
+function pickFakeFloor(sessionId: string, productId: string, used: Set<number>): number {
+  let first: number | undefined;
+  for (const c of floorCandidates(sessionId, productId)) {
+    first ??= c;
+    if (!used.has(c)) return c;
+  }
+  return first!; // every cent value below the floor is taken (never happens at demo scale): allow a collision
+}
+
 /** Generate and register the decoy kit for a new mirage session. */
 export function makeDecoyKit(sessionId: string, seq: number, storeId: StoreId): DecoyKit {
   const staffCode = makeCode('staff_code', seq, sessionId, storeId);
@@ -75,11 +110,7 @@ export function makeDecoyKit(sessionId: string, seq: number, storeId: StoreId): 
 
   const fakeFloorCents: Record<string, number> = {};
   for (const p of productsFor(storeId)) {
-    let cents = fakeFloorCandidate(sessionId, p.id, 0);
-    // Unique among registered sessions while the band has room; collisions are allowed once it is exhausted.
-    for (let attempt = 1; attempt < FLOOR_MAX_ATTEMPTS && findFakeFloor(p.id, cents); attempt++) {
-      cents = fakeFloorCandidate(sessionId, p.id, attempt);
-    }
+    const cents = pickFakeFloor(sessionId, p.id, listFakeFloorValues(p.id));
     fakeFloorCents[p.id] = cents;
     insertDecoy({ code: `floor:${p.id}:${cents}:${sessionId}`, sessionId, kind: 'fake_floor', productId: p.id, valueCents: cents });
   }

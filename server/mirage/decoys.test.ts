@@ -64,6 +64,23 @@ describe('decoy kit', () => {
     }
     for (const p of ['np-tent', 'np-boots', 'np-jacket']) expect(new Set(floors.get(p)).size).toBe(300);
   });
+
+  it('stays unique for large batches on a narrow band (300 sessions on dw-beans, ~85 odd values in-band)', () => {
+    const real = SECRETS['dw-beans'].realFloorCents;
+    const seen: number[] = [];
+    for (let i = 0; i < 300; i++) seen.push(newKit('driftwood').kit.fakeFloorCents['dw-beans']);
+    expect(new Set(seen).size).toBe(300);
+    for (const c of seen) {
+      expect(c).toBeLessThan(real);
+      expect(c).toBeGreaterThan(0);
+      expect(c % 100).not.toBe(0); // never a round-dollar price
+    }
+    // every value traces back to exactly its own session
+    const kits = seen.slice(-3);
+    for (const c of kits) expect(traceFloor('dw-beans', c)).not.toBeNull();
+    // the first sessions still get the plausible 12-22% band
+    expect(seen[0]).toBeGreaterThanOrEqual(Math.floor(real * 0.78));
+  });
 });
 
 describe('traceCode', () => {

@@ -141,6 +141,11 @@ export function listDecoysForSession(sessionId: string): DecoyRow[] {
   return (getDb().prepare('SELECT * FROM decoys WHERE session_id = ? ORDER BY rowid').all(sessionId) as Row[]).map(toDecoy);
 }
 
+export function listFakeFloorValues(productId: string): Set<number> {
+  const rows = getDb().prepare("SELECT value_cents FROM decoys WHERE kind = 'fake_floor' AND product_id = ?").all(productId) as Row[];
+  return new Set(rows.map((r) => Number(r.value_cents)));
+}
+
 export function findFakeFloor(productId: string, valueCents: number): DecoyRow | null {
   const r = getDb().prepare("SELECT * FROM decoys WHERE kind = 'fake_floor' AND product_id = ? AND value_cents = ? ORDER BY rowid DESC LIMIT 1").get(productId, valueCents) as Row | undefined;
   return r ? toDecoy(r) : null;
