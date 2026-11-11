@@ -28,6 +28,10 @@ PayPal AI Hackathon. Deadline Thu Nov 12 2026, 12:00 PT. Read `docs/PLAN.md` for
 If you need a change in someone else's path, write it in your final report under "Needs from other workstreams". Don't edit it.
 
 ## Hard rules
+0. **Every Claude API call goes through `createMessage()` in `server/llm.ts`.** Never construct `new Anthropic()` or call
+   `client.messages.create` anywhere else. It enforces the user's hard $5 total spend cap (ledger `data/llm-spend.jsonl`)
+   and throws `BudgetExceededError` instead of sending. Catch it and stop cleanly. Never raise the cap yourself.
+   Use mocks in tests: `__setClientForTests()` or `MIRAGE_FAKE_LLM=1`. Never spend real tokens in unit tests.
 1. Secrets: read config only through `server/config.ts`. Never print or commit key values. `.secrets/` is gitignored.
 2. Sandbox only. `PAYPAL_BASE` must be the sandbox host. Refuse to run if it isn't.
 3. The browser must never receive: real floor prices, real codes, decoy registry, `trapped` flags, risk payloads.
