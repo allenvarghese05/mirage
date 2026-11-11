@@ -16,7 +16,7 @@ function build(cfg: Parameters<typeof makeTestDeps>[0] = {}) {
   d = makeTestDeps(cfg);
   app = express();
   app.set('trust proxy', true);
-  app.use(express.json());
+
   app.use(createCheckoutRouter(() => d));
 }
 
@@ -336,5 +336,23 @@ describe('browser never receives trap internals', () => {
       expect(b).not.toMatch(/trap|decoy|source|s0|refund_override|NETWORK|IDENTITY/i);
       for (const s of Object.values(SECRETS)) expect(b).not.toContain(String(s.realFloorCents));
     }
+  });
+});
+
+describe('GET /api/dashboard/payers/:payerId/history', () => {
+  it('returns PayPal history for the payer via the Agent Toolkit', async () => {
+    d.toolkitTools.list_transactions = {
+      execute: async () => JSON.stringify({ transaction_details: [{ transaction_info: { transaction_id: 'T1', transaction_amount: { currency_code: 'USD', value: '57.00' } }, payer_info: { account_id: 'DEVPAYER01' } }] }),
+    };
+    const r = await request(app).get('/api/dashboard/payers/DEVPAYER01/history');
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ payerId: 'DEVPAYER01', transactions: [{ transactionId: 'T1', amountCents: 5700 }] });
+  });
+
+  it('reports an error instead of failing when the toolkit is unavailable', async () => {
+    d.toolkit = () => { throw new Error('Missing PAYPAL_CLIENT_ID'); };
+    const r = await request(app).get('/api/dashboard/payers/DEVPAYER01/history');
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ payerId: 'DEVPAYER01', transactions: [], error: expect.stringMatching(/PAYPAL_CLIENT_ID/) });
   });
 });

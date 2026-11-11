@@ -19,6 +19,7 @@ import type { DecoyKind, TripEvent } from '../../shared/types';
 import { config } from '../config';
 import { createPayPalClient, type PayPalApi } from './client';
 import { createFakePayPal, type FakePayPal } from './fake';
+import { createToolkitRunner, type ToolkitRunner } from './toolkit';
 
 export const SIM_ORDER_PREFIX = 'SIM-';
 export const isSimOrderId = (orderId: string | undefined | null): boolean => Boolean(orderId?.startsWith(SIM_ORDER_PREFIX));
@@ -44,6 +45,8 @@ export interface PaypalLayerDeps {
   paypal(): PayPalApi;
   /** In-process PayPal for SIM- orders (sim mode only). */
   simPaypal(): FakePayPal;
+  /** PayPal Agent Toolkit (get_order, create_refund, list_transactions). Throws if keys are missing. */
+  toolkit(): ToolkitRunner;
   config: PaypalLayerConfig;
 }
 
@@ -53,6 +56,7 @@ const notWired = (name: string) => () => {
 
 let realClient: PayPalApi | null = null;
 let simClient: FakePayPal | null = null;
+let toolkitRunner: ToolkitRunner | null = null;
 
 function defaults(): PaypalLayerDeps {
   return {
@@ -63,6 +67,9 @@ function defaults(): PaypalLayerDeps {
       clientId: config.paypal.clientId, clientSecret: config.paypal.clientSecret, base: config.paypal.base,
     })),
     simPaypal: () => (simClient ??= createFakePayPal({ idPrefix: SIM_ORDER_PREFIX })),
+    toolkit: () => (toolkitRunner ??= createToolkitRunner({
+      clientId: config.paypal.clientId, clientSecret: config.paypal.clientSecret, base: config.paypal.base,
+    })),
     config: {
       sim: config.sim,
       merchantId: config.paypal.merchantId,

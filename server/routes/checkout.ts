@@ -3,9 +3,11 @@
 //   POST /api/checkout/:orderId/approved
 //   GET  /api/orders/:orderId/status
 //   POST /api/dashboard/review/:orderId
+//   GET  /api/dashboard/payers/:payerId/history   (PayPal history via the Agent Toolkit; not yet in shared/api.ts)
 import express, { Router, type NextFunction, type Request, type Response } from 'express';
 import { getPaypalDeps, type PaypalLayerDeps } from '../paypal/deps';
 import { approve, checkout, HttpError, MESSAGES, orderStatus, review } from '../paypal/orders';
+import { getPayerHistory, type PayerHistory } from '../paypal/toolkit';
 
 export { MESSAGES };
 
@@ -13,7 +15,7 @@ type Handler = (req: Request, deps: PaypalLayerDeps) => Promise<unknown> | unkno
 
 export function createCheckoutRouter(getDeps: () => PaypalLayerDeps = getPaypalDeps): Router {
   const r = Router();
-  r.use(express.json({ limit: '100kb' }));
+  const json = express.json({ limit: '100kb' });
 
   const handle = (fn: Handler) => async (req: Request, res: Response, _next: NextFunction) => {
     try {
@@ -28,14 +30,22 @@ export function createCheckoutRouter(getDeps: () => PaypalLayerDeps = getPaypalD
     }
   };
 
-  r.post('/api/checkout', handle((req, deps) => checkout(deps, req.body, {
+  r.post('/api/checkout', json, handle((req, deps) => checkout(deps, req.body, {
     ip: req.ip,
     userAgent: req.get('user-agent'),
     wantsRealPaypal: req.get('x-mirage-real-paypal') === '1',
   })));
-  r.post('/api/checkout/:orderId/approved', handle((req, deps) => approve(deps, String(req.params.orderId), req.body)));
+  r.post('/api/checkout/:orderId/approved', json, handle((req, deps) => approve(deps, String(req.params.orderId), req.body)));
   r.get('/api/orders/:orderId/status', handle((req, deps) => orderStatus(deps, String(req.params.orderId))));
-  r.post('/api/dashboard/review/:orderId', handle((req, deps) => review(deps, String(req.params.orderId), req.body)));
+  r.post('/api/dashboard/review/:orderId', json, handle((req, deps) => review(deps, String(req.params.orderId), req.body)));
+  r.get('/api/dashboard/payers/:payerId/history', handle(async (req, deps): Promise<PayerHistory> => {
+    const payerId = String(req.params.payerId);
+    try {
+      return await getPayerHistory(deps.toolkit(), payerId);
+    } catch (e) {
+      return { payerId, source: 'paypal-agent-toolkit:list_transactions', transactions: [], error: (e as Error).message };
+    }
+  }));
   return r;
 }
 

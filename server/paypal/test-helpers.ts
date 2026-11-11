@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { DecoyKind, StoreId, StoreMode, TripEvent } from '../../shared/types';
 import { createFakePayPal, type FakePayPal } from './fake';
 import type { EmitInput, PaypalLayerConfig, PaypalLayerDeps } from './deps';
+import { createToolkitRunner, type ToolkitTools } from './toolkit';
 
 export function memoryDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -30,6 +31,8 @@ export interface TestDeps extends PaypalLayerDeps {
   codes: Map<string, { sessionId: string; kind: DecoyKind }>;
   pp: FakePayPal;
   sim: FakePayPal;
+  /** Fake Agent Toolkit tools (AI SDK shape); tests may replace entries. */
+  toolkitTools: ToolkitTools;
 }
 
 export function makeTestDeps(cfg: Partial<PaypalLayerConfig> = {}): TestDeps {
@@ -39,8 +42,13 @@ export function makeTestDeps(cfg: Partial<PaypalLayerConfig> = {}): TestDeps {
   const pp = createFakePayPal();
   const sim = createFakePayPal({ idPrefix: 'SIM-' });
   let n = 0;
+  const toolkitTools: ToolkitTools = {
+    list_transactions: { execute: async () => JSON.stringify({ transaction_details: [] }) },
+  };
+  const toolkitRunner = createToolkitRunner({ tools: () => toolkitTools });
   return {
-    db, events, codes, pp, sim,
+    db, events, codes, pp, sim, toolkitTools,
+    toolkit: () => toolkitRunner,
     getDb: () => db,
     traceCode: (code) => codes.get(code.trim().toUpperCase()) ?? null,
     emit: (e: EmitInput) => {
