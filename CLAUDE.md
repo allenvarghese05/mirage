@@ -44,3 +44,9 @@ If you need a change in someone else's path, write it in your final report under
 - `npm run dev`: server on :8787, web on :5173 (proxies /api).
 - `MIRAGE_SIM=1` enables simulated payer injection for sim-created orders (never in the demo deploy).
 - `npm run sim -- --help`: attack/honest simulation runner.
+
+## Environment gotchas
+- Inside the Claude Code command sandbox, `npm install` and Node network calls (Anthropic, PayPal) can fail with
+  `failed to copy trust settings of system certificate`. That is the sandbox, not your code: rerun that command
+  outside the sandbox. Unit tests should not need the network (mock the LLM and PayPal).
+- `node:sqlite` prints an ExperimentalWarning on Node 22. Ignore it.
