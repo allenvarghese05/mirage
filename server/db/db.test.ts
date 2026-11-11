@@ -4,8 +4,9 @@ import {
   recordOrder, updateOrder, getOrder, listOrdersForSession,
   upsertBlocklist, getBlocklisted, listBlocklist,
   recordRiskPayload, listRiskPayloads, getPastOrder, addMessage, listMessages,
-  insertSimRuns, listSimRuns,
+  insertSimRuns, listSimRuns, migrate,
 } from './index';
+import { DatabaseSync } from 'node:sqlite';
 import type { SimRun } from '../../shared/types';
 
 beforeEach(() => resetDb());
@@ -14,6 +15,22 @@ describe('db', () => {
   it('uses an in-memory database under vitest and applies the schema', () => {
     const tables = getDb().prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
     expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(['sessions', 'orders', 'blocklist', 'past_orders']));
+  });
+
+  it('migrates a database file created before sessions.agent_profile existed', () => {
+    const old = new DatabaseSync(':memory:');
+    old.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY, store_id TEXT NOT NULL, store_mode TEXT NOT NULL DEFAULT 'mirage', mode TEXT NOT NULL DEFAULT 'normal', seq INTEGER NOT NULL, client_metadata_id TEXT NOT NULL, ip TEXT, user_agent TEXT, sim_run_id TEXT, created_at TEXT NOT NULL)");
+    migrate(old);
+    migrate(old); // idempotent
+    const cols = (old.prepare('PRAGMA table_info(sessions)').all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toContain('agent_profile');
+  });
+
+  it('old sessions (no profile recorded) read as hardened; new ones default to realistic', () => {
+    const s = createSession({ storeId: 'northpeak', storeMode: 'mirage' });
+    expect(s.agentProfile).toBe('realistic');
+    getDb().prepare('UPDATE sessions SET agent_profile = NULL WHERE id = ?').run(s.id);
+    expect(getSession(s.id)!.agentProfile).toBe('hardened');
   });
 
   it('seeds past_orders with purchase dates relative to now', () => {

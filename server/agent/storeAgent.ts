@@ -9,6 +9,7 @@ import { emit } from '../mirage/tripwire';
 import { classifyAttack } from './classifier';
 import { getLlmClient } from './llm';
 import { buildSystemPrompt, greeting } from './prompts';
+import { currentAgentProfile } from './profile';
 import { executeTool, toolDefinitions } from './tools';
 import type { ChatMessage, StoreId, StoreMode } from '../../shared/types';
 
@@ -19,7 +20,7 @@ export const UNAVAILABLE_REPLY = 'Our assistant is unavailable right now. Please
 export class SessionNotFoundError extends Error {}
 
 export function startSession(input: { storeId: StoreId; storeMode?: StoreMode; simRunId?: string; ip?: string; userAgent?: string }): { sessionId: string; greeting: string } {
-  const session = createSession({ ...input, storeMode: input.storeMode ?? 'mirage' });
+  const session = createSession({ ...input, storeMode: input.storeMode ?? 'mirage', agentProfile: currentAgentProfile() });
   if (session.storeMode === 'mirage') makeDecoyKit(session.id, session.seq, session.storeId);
   const hello = greeting(session.storeId);
   addMessage({ sessionId: session.id, role: 'assistant', content: hello });

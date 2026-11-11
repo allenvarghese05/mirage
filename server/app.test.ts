@@ -61,6 +61,18 @@ describe('store-facing API', () => {
     } finally { config.sim = saved; }
   });
 
+  it('records the agent profile in force when the session started', async () => {
+    const saved = process.env.MIRAGE_AGENT_PROFILE;
+    process.env.MIRAGE_AGENT_PROFILE = 'hardened';
+    try {
+      const id = await newSession();
+      expect(getSession(id)!.agentProfile).toBe('hardened');
+      expect((await request(app()).get(`/api/dashboard/sessions/${id}`)).body.agentProfile).toBe('hardened');
+    } finally {
+      if (saved === undefined) delete process.env.MIRAGE_AGENT_PROFILE; else process.env.MIRAGE_AGENT_PROFILE = saved;
+    }
+  });
+
   it('chats, and rejects unknown sessions and empty messages', async () => {
     const id = await newSession();
     const res = await request(app()).post(`/api/sessions/${id}/messages`).send({ content: 'What products do you sell?' });
@@ -134,6 +146,8 @@ describe('dashboard API', () => {
     expect(sessions[0].messageCount).toBeGreaterThan(3);
 
     const detail = (await request(app()).get(`/api/dashboard/sessions/${id}`)).body;
+    expect(detail.agentProfile).toBe('realistic');
+    expect(sessions[0].agentProfile).toBe('realistic');
     expect(detail.decoys.staffCode).toMatch(/^NP-STAFF-/);
     expect(detail.messages.some((m: { role: string }) => m.role === 'tool')).toBe(true);
     expect(detail.playbook.map((p: { technique: string }) => p.technique)).toEqual(['injection', 'refund_fraud']);
