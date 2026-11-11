@@ -84,7 +84,7 @@ export function Scoreboard() {
     { field: 'detectedStage', headerName: 'Caught at', width: 132, valueFormatter: (p) => STAGE[p.value as SimRun['detectedStage']] ?? '' , cellClassRules: { 'sb-id': (p) => p.value === 'identity' } },
     { field: 'identityCaptured', headerName: 'Identity', width: 100, cellRenderer: yes(true) },
     { field: 'attributedCorrectly', headerName: 'Attributed', width: 112, cellRenderer: yes(true) },
-    { field: 'falseAlarm', headerName: 'False alarm', width: 116, cellRenderer: (p: ICellRendererParams<SimRun, boolean>) => (p.data?.isAttack ? <span className="sb-na">—</span> : p.value ? <span className="sb-bad">yes</span> : <span className="sb-good">✗ none</span>) },
+    { field: 'falseAlarm', headerName: 'False alarm', width: 116, cellRenderer: (p: ICellRendererParams<SimRun, boolean>) => (p.data?.isAttack ? <span className="sb-na">—</span> : p.value ? <span className="sb-bad">yes</span> : <span className="sb-good">none</span>) },
     { field: 'honestOutcomeOk', headerName: 'Served OK', width: 112, cellRenderer: yes(true) },
   ], []);
 
