@@ -1,6 +1,6 @@
 // Store-facing routes: what a shopper (or an attacker) can call. Nothing here may return real secrets,
 // decoy registry data, trapped flags or risk payloads.
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
 import { STORES, productsFor } from '../catalog';
@@ -33,10 +33,22 @@ chatRouter.get('/api/stores/:storeId/products', (req, res) => {
   res.json(body);
 });
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+/**
+ * The baseline store holds REAL secrets and working privileged tools, so it is only reachable by the sim
+ * (MIRAGE_SIM=1) or a direct local request. Anything through a proxy (e.g. the public demo) gets mirage.
+ */
+function baselineAllowed(req: Request): boolean {
+  if (config.sim) return true;
+  return LOOPBACK.has(req.socket.remoteAddress ?? '') && !req.get('x-forwarded-for');
+}
+
 chatRouter.post('/api/sessions', (req, res) => {
   const parsed = createSessionSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: 'invalid request', issues: parsed.error.issues.map((i) => i.message) }); return; }
-  const body: CreateSessionRes = startSession({ ...parsed.data, ip: req.ip, userAgent: req.get('user-agent') ?? undefined });
+  const storeMode = parsed.data.storeMode === 'baseline' && !baselineAllowed(req) ? 'mirage' : parsed.data.storeMode;
+  const body: CreateSessionRes = startSession({ ...parsed.data, storeMode, ip: req.ip, userAgent: req.get('user-agent') ?? undefined });
   res.json(body);
 });
 
