@@ -60,6 +60,10 @@ export async function runNetworkScenario(opts: NetworkScenarioOptions): Promise<
   for (let i = 0; i < attempts && !trappedSession && !opts.meter.exceeded; i++) {
     const rec = await runOne(plan(i + 1, attack, first), opts);
     leg1.push(rec);
+    if (rec.endReason === 'budget_abort' || rec.endReason === 'persona_error') {
+      log(`[network] stopped: ${rec.error ?? rec.endReason}`);
+      break;
+    }
     if (!rec.sessionId) continue;
     const detail = await opts.api.sessionDetail(rec.sessionId);
     simRuns.push(computeSimRun(rec, detail, attack));
@@ -69,7 +73,10 @@ export async function runNetworkScenario(opts: NetworkScenarioOptions): Promise<
   }
 
   let result: Omit<NetworkScenarioResult, 'file'>;
-  if (!trappedSession) {
+  const stopped = leg1.find((r) => r.endReason === 'budget_abort' || r.endReason === 'persona_error');
+  if (!trappedSession && stopped) {
+    result = { ok: false, networkMatch: false, leg1, simRuns, reason: `Stopped before Dev was trapped: ${stopped.error ?? stopped.endReason}` };
+  } else if (!trappedSession) {
     result = { ok: false, networkMatch: false, leg1, simRuns, reason: `Dev was never trapped at ${first} in ${leg1.length} attempt(s) (no decoy leaked or none redeemed).` };
   } else {
     const p2 = plan(attempts + 1, networkRepeat(shopper), second, { brainPersona: shopper, expectedSourceSessionIds: [trappedSession] });

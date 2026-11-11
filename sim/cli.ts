@@ -1,7 +1,7 @@
 // npm run sim -- --help
 import { parseArgs } from 'node:util';
-import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../server/config';
+import { spentUsd } from '../server/llm';
 import type { StoreId, StoreMode, ScoreboardSummary } from '../shared/types';
 import { MirageApi } from './api';
 import { heuristicBrainFactory, llmBrainFactory, type BrainFactory } from './brain';
@@ -17,7 +17,7 @@ Usage:
   npm run sim -- --batch <name> [options]
   npm run sim -- --scenario network [options]
 
-Exit codes: 0 ok, 1 network scenario failed, 2 bad arguments / server unreachable, 3 budget abort,
+Exit codes: 0 ok, 1 network scenario failed, 2 bad arguments / server unreachable, 3 spend limit reached,
             4 persona LLM unusable (bad key, usage limit).
 
 Options:
@@ -30,8 +30,10 @@ Options:
   --stores <s>            northpeak | driftwood | both (default both)
   --concurrency <N>       Parallel runs (default 4)
   --max-turns <N>         Max shopper messages per run (default 12)
-  --budget-usd <X>        Abort once spend passes X (default 5). Persona spend is measured; store-agent
-                          spend is estimated.
+  --budget-usd <X>        Per-batch limit: stop once this batch's spend passes X (default 5). Persona spend
+                          is measured; store-agent spend is estimated. Separately, every Claude call goes
+                          through server/llm.ts, whose shared hard cap (ledger data/llm-spend.jsonl, server +
+                          sim together) stops the batch cleanly via BudgetExceededError.
   --brain <b>             llm (default) | heuristic (no LLM; for wiring checks against MIRAGE_FAKE_LLM=1)
   --real-approval         Approve on real sandbox PayPal via sim/approver.ts (slow; forces concurrency 1)
   --base-url <url>        Server URL (default http://localhost:8787)
@@ -129,16 +131,12 @@ async function main() {
 
   let brainFactory: BrainFactory = heuristicBrainFactory;
   if (brainKind === 'llm') {
-    if (!config.anthropicKey && !process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
-      console.log('  note: no ANTHROPIC_API_KEY in env or .secrets/dev.keys; relying on an `ant auth login` profile if present.');
-    }
-    let client: Anthropic;
-    try {
-      client = new Anthropic(config.anthropicKey ? { apiKey: config.anthropicKey } : {});
-    } catch (e) {
-      fail(`cannot create Anthropic client (${(e as Error).message}). Fill ANTHROPIC_API_KEY in .secrets/dev.keys, or use --brain heuristic.`);
-    }
-    brainFactory = llmBrainFactory(client, models);
+    // Every persona call goes through createMessage() (server/llm.ts): one hard spend cap shared by server + sim.
+    const spent = spentUsd();
+    console.log(`  shared Claude spend so far: $${spent.toFixed(4)} of $${config.llmBudgetUsd.toFixed(2)} hard cap (ledger ${config.llmLedgerPath})`);
+    if (!config.anthropicKey) fail('ANTHROPIC_API_KEY missing in .secrets/dev.keys (or use --brain heuristic for a wiring check).');
+    if (spent >= config.llmBudgetUsd) fail('the shared Claude spend cap is already reached; nothing to run. Use --brain heuristic, or ask the user about the cap.');
+    brainFactory = llmBrainFactory(models);
   }
 
   let realApproval: ((approveUrl: string) => Promise<void>) | undefined;
@@ -193,7 +191,10 @@ async function main() {
   if (res.fatal) {
     console.log(`Persona LLM unusable: ${res.fatal}\n  Check ANTHROPIC_API_KEY / usage limits, or use --brain heuristic for a wiring check.`);
     process.exitCode = 4;
-  } else if (res.aborted) process.exitCode = 3;
+  } else if (res.aborted) {
+    console.log(`Stopped by spend limit (${res.budgetStop}). Completed and scored ${res.simRuns.length} of ${plans.length} planned runs.`);
+    process.exitCode = 3;
+  }
 }
 
 main().catch((e) => {

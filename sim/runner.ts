@@ -10,6 +10,7 @@ import type { MirageApi } from './api';
 import type { BrainFactory } from './brain';
 import { emptyUsage, addUsage, serverTurnEstimateUsd, type CostMeter } from './cost';
 import { computeSimRun, summarize } from './metrics';
+import { BudgetExceededError } from '../server/llm';
 import { makePayer } from './payers';
 import type { Persona, PersonaContext } from './personas';
 import type { RunRecord } from './types';
@@ -103,11 +104,19 @@ export async function runOne(plan: RunPlan, deps: RunDeps): Promise<RunRecord> {
       try {
         r = await brain.next({ agentReply: reply, turn, maxTurns });
       } catch (e) {
+        if (e instanceof BudgetExceededError) {
+          // Shared hard spend cap (server/llm.ts ledger). Nothing was sent; stop this run and the batch.
+          rec.endReason = 'budget_abort';
+          rec.error = e.message;
+          break;
+        }
         // The sim's own LLM failed: not the store's fault, so the run is excluded rather than scored.
+        // HTTP 400/401/403 (usage limit, bad key) and non-HTTP errors (missing key; transient errors were
+        // already retried by the SDK) cannot be fixed by retrying, so they also stop the batch.
         const status = (e as { status?: number }).status;
         rec.endReason = 'persona_error';
         rec.error = `persona LLM: ${errMsg(e)}`;
-        rec.fatal = status === 400 || status === 401 || status === 403;
+        rec.fatal = status === undefined || status === 400 || status === 401 || status === 403;
         break;
       }
       if (r.usage) rec.personaUsage = addUsage(rec.personaUsage, r.usage);
@@ -196,6 +205,8 @@ export interface BatchResult {
   aborted: boolean;
   /** Why the batch stopped early because the persona LLM is unusable (bad key, usage limit). */
   fatal?: string;
+  /** Set when a spend limit stopped the batch: the shared ledger cap (BudgetExceededError) or --budget-usd. */
+  budgetStop?: string;
 }
 
 const EXCLUDED_REASONS = new Set(['persona_refused', 'persona_error', 'budget_abort']);
@@ -211,6 +222,8 @@ export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
   const excluded: Excluded[] = [];
   let aborted = false;
   let fatal: string | undefined;
+  /** Set when a spend limit stops the batch: shared ledger cap (BudgetExceededError) or --budget-usd. */
+  let budgetStop: string | undefined;
   let done = 0;
   let next = 0;
 
@@ -243,13 +256,13 @@ export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
 
   async function worker() {
     for (;;) {
-      if (opts.meter.exceeded || fatal) { aborted = true; return; }
+      if (opts.meter.exceeded || fatal || budgetStop) { aborted = true; return; }
       const i = next++;
       if (i >= plans.length) return;
       const plan = plans[i];
       const rec = await runOne(plan, opts);
       records.push(rec);
-      if (rec.endReason === 'budget_abort') aborted = true;
+      if (rec.endReason === 'budget_abort') { aborted = true; budgetStop ??= rec.error ?? opts.meter.line(); }
       if (rec.fatal && !fatal) fatal = rec.error;
       const run = await score(plan, rec);
       done++;
@@ -264,8 +277,9 @@ export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
   }
 
   await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.concurrency, plans.length)) }, worker));
-  if (fatal) log(`Stopped after ${records.length}/${plans.length} runs: the persona LLM cannot be called (${fatal}).`);
-  else if (aborted) log(`Budget exceeded: stopped after ${records.length}/${plans.length} runs. ${opts.meter.line()}`);
+  if (aborted && !fatal) budgetStop ??= opts.meter.line();
+  if (fatal) log(`Stopped early: the persona LLM cannot be called (${fatal}). ${scored.length}/${plans.length} runs completed and scored.`);
+  else if (aborted) log(`Spend limit reached (${budgetStop}). ${scored.length}/${plans.length} runs completed and scored; unfinished runs are excluded.`);
 
   records.sort((a, b) => a.runId.localeCompare(b.runId));
   const runs = flush();
@@ -273,5 +287,5 @@ export async function runBatch(opts: BatchOptions): Promise<BatchResult> {
     ? { ok: false, status: 0, error: 'not posted' }
     : await opts.api.postSimRuns(runs);
   flush(posted);
-  return { batchId: opts.batchId, records, simRuns: runs, summary: summarize(runs), excluded, posted, file, aborted, fatal };
+  return { batchId: opts.batchId, records, simRuns: runs, summary: summarize(runs), excluded, posted, file, aborted, fatal, budgetStop };
 }

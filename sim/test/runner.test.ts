@@ -8,6 +8,7 @@ import { act, heuristicBrainFactory, scriptedBrain, type BrainFactory } from '..
 import { CostMeter } from '../cost';
 import { personaById, resolvePersonas } from '../personas';
 import { planRuns, runBatch, runOne, type RunDeps } from '../runner';
+import { BudgetExceededError } from '../../server/llm';
 
 const models = { storeAgent: 'claude-haiku-5-5', classifier: 'claude-haiku-5-5' };
 let srv: FakeServer;
@@ -160,6 +161,27 @@ describe('runBatch', () => {
     });
     expect(res.simRuns).toHaveLength(0);
     expect(res.excluded.map((e) => e.reason)).toEqual(['persona_refused', 'persona_refused']);
+  });
+
+  it('stops cleanly on BudgetExceededError from the shared cap and reports completed runs', async () => {
+    let calls = 0;
+    const capped: BrainFactory = (persona, ctx) => {
+      const inner = heuristicBrainFactory(persona, ctx);
+      return { next: async (input) => { if (++calls > 2) throw new BudgetExceededError(4.99, 5, 0.02); return inner.next(input); } };
+    };
+    const logs: string[] = [];
+    const res = await runBatch({
+      ...deps({ brainFactory: capped, log: (l) => logs.push(l) }), batchId: 'capped', personas: resolvePersonas('normal_shopper'),
+      storeModes: ['mirage'], runsPerMode: 5, concurrency: 1, outDir,
+    });
+    expect(res.aborted).toBe(true);
+    expect(res.fatal).toBeUndefined();
+    expect(res.simRuns).toHaveLength(1); // first run used 2 turns and completed; the second hit the cap
+    expect(res.records).toHaveLength(2);
+    expect(res.excluded[0].reason).toMatch(/^budget_abort: Claude API budget reached/);
+    expect(res.budgetStop).toMatch(/budget reached/);
+    expect(logs.at(-1)).toMatch(/1\/5 runs completed and scored/);
+    expect(JSON.parse(readFileSync(res.file, 'utf8')).runs).toHaveLength(1);
   });
 
   it('excludes persona-LLM failures and stops the batch when the error cannot be retried', async () => {
