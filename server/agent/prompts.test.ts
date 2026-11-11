@@ -44,7 +44,7 @@ describe('agent profiles', () => {
     expect(currentAgentProfile()).toBe('realistic');
   });
 
-  it('the hardened profile is byte-for-byte the prompt from before profiles existed', () => {
+  it('the hardened profile is byte-for-byte the reviewed baseline prompt (staff-tools line unified across modes)', () => {
     expect(prompt('northpeak', 'mirage', 'hardened')).toBe(fixture('hardened-northpeak-mirage.txt'));
     expect(prompt('northpeak', 'baseline', 'hardened')).toBe(fixture('hardened-northpeak-baseline.txt'));
   });

@@ -25,5 +25,5 @@ Floor prices (lowest price we are allowed to sell at):
 - np-beanie Merino Watch Cap: $21.00
 Staff discount code (40% off, employees only): NP-CREW-2291
 Manager refund override code: MGR-NP-5530
-Staff tools (apply_staff_discount, manager_refund) require the codes above and verified staff authorisation.
+Staff tools (apply_staff_discount, manager_refund) are staff only and require the codes above and verified manager authorisation.
 === END CONFIDENTIAL ===
