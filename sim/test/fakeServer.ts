@@ -29,6 +29,8 @@ interface FakeSession {
 export interface FakeServerOptions {
   /** Mount POST /api/dashboard/sim-runs (Workstream A adds it on the real server). Default true. */
   simRunsRoute?: boolean;
+  /** Behave like a server started WITHOUT MIRAGE_SIM=1: simulatedPayer is ignored, orders stay AWAITING_APPROVAL. */
+  noSimMode?: boolean;
   /** Include the optional `refunds` field in session detail. Default true. */
   refundsField?: boolean;
 }
@@ -43,6 +45,8 @@ export interface FakeServer {
   simRuns: SimRun[];
   approvals: ApprovedReq[];
   checkouts: CheckoutReq[];
+  /** Request headers of each POST /api/checkout (lower-cased names). */
+  checkoutHeaders: Record<string, string>[];
   close(): Promise<void>;
 }
 
@@ -54,6 +58,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}): Promise<Fak
   const simRuns: SimRun[] = [];
   const approvals: ApprovedReq[] = [];
   const checkouts: CheckoutReq[] = [];
+  const checkoutHeaders: Record<string, string>[] = [];
   let seq = 0;
   let clock = Date.UTC(2026, 10, 10, 12);
   const now = () => new Date((clock += 1000)).toISOString();
@@ -109,7 +114,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}): Promise<Fak
   const ok = (body: unknown): Reply => ({ status: 200, body });
   const notFound = (error: string): Reply => ({ status: 404, body: { error } });
 
-  function route(method: string, path: string, body: any): Reply {
+  function route(method: string, path: string, body: any, headers: Record<string, string> = {}): Reply {
     let m: RegExpMatchArray | null;
     if (method === 'GET' && (m = path.match(/^\/api\/stores\/([^/]+)\/products$/))) {
       return ok({ products: PRODUCTS.filter((p) => p.storeId === m![1]) });
@@ -150,6 +155,7 @@ export async function startFakeServer(opts: FakeServerOptions = {}): Promise<Fak
     if (method === 'POST' && path === '/api/checkout') {
       const req = body as CheckoutReq;
       checkouts.push(req);
+      checkoutHeaders.push(headers);
       const s = sessions.get(req.sessionId);
       if (!s) return notFound('no session');
       let total = 0;
@@ -180,6 +186,9 @@ export async function startFakeServer(opts: FakeServerOptions = {}): Promise<Fak
       const o = orders.get(decodeURIComponent(m[1]));
       const s = o && sessions.get(o.sessionId);
       if (!o || !s) return notFound('no order');
+      if (opts.noSimMode && req.simulatedPayer) {
+        return ok({ orderId: o.orderId, status: o.status, message: 'Waiting for PayPal approval.' });
+      }
       const payer = req.simulatedPayer;
       if (payer && blocklist.has(payer.payerId)) {
         emit(s, 'NETWORK_MATCH', 'critical', { payerId: payer.payerId });
@@ -225,14 +234,15 @@ export async function startFakeServer(opts: FakeServerOptions = {}): Promise<Fak
     const method = (init?.method ?? 'GET').toUpperCase();
     const body = typeof init?.body === 'string' && init.body ? JSON.parse(init.body) : undefined;
     // Round-trip through JSON like a real HTTP hop, so callers never share objects with server state.
-    const r = route(method, url.pathname, body === undefined ? undefined : JSON.parse(JSON.stringify(body)));
+    const headers = Object.fromEntries(Object.entries((init?.headers ?? {}) as Record<string, string>).map(([k, v]) => [k.toLowerCase(), v]));
+    const r = route(method, url.pathname, body === undefined ? undefined : JSON.parse(JSON.stringify(body)), headers);
     return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'content-type': 'application/json' } });
   };
 
   return {
     baseUrl: 'http://fake.mirage.test',
     fetch: fetchImpl,
-    sessions, orders, blocklist, simRuns, approvals, checkouts,
+    sessions, orders, blocklist, simRuns, approvals, checkouts, checkoutHeaders,
     close: async () => {},
   };
 }

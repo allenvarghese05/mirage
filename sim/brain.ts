@@ -6,7 +6,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { createMessage, type CreateOpts } from '../server/llm';
 import type { Persona, PersonaContext } from './personas';
-import { emptyUsage, usageCostUsd } from './cost';
+import { addUsage, emptyUsage, usageCostUsd } from './cost';
 import type { TokenUsage } from './types';
 
 export interface BrainAction {
@@ -89,6 +89,15 @@ export interface LlmBrainOptions {
   createOpts?: Omit<CreateOpts, 'purpose'>;
 }
 
+/** The persona model hit max_tokens twice in a row. Not fatal for the batch; the run is excluded. Carries the spend. */
+export class PersonaTruncatedError extends Error {
+  readonly fatal = false;
+  constructor(readonly usage: TokenUsage, readonly costUsd: number) {
+    super('persona response hit max_tokens twice; no usable action');
+    this.name = 'PersonaTruncatedError';
+  }
+}
+
 export class LlmBrain implements PersonaBrain {
   private readonly messages: Anthropic.MessageParam[] = [];
   private readonly system: string;
@@ -107,22 +116,30 @@ export class LlmBrain implements PersonaBrain {
 
     // Throws BudgetExceededError (shared $ cap reached) before sending; the runner stops the batch cleanly.
     const create = this.opts.create ?? createMessage;
-    const response = await create({
-      model: this.opts.model,
-      max_tokens: 4000,
-      system: this.system,
-      messages: this.messages,
-      cache_control: { type: 'ephemeral' },
-      output_config: { effort: this.opts.effort, format: { type: 'json_schema', schema: ACTION_SCHEMA } },
-    }, { ...this.opts.createOpts, purpose: this.opts.purpose });
-
-    const usage: TokenUsage = {
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-      cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
-      cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
-    };
-    const costUsd = usageCostUsd(response.model, usage);
+    let usage = emptyUsage();
+    let costUsd = 0;
+    let response: Anthropic.Message | undefined;
+    // A response cut off at max_tokens has no usable JSON: retry once, then give up on this run (excluded).
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      response = await create({
+        model: this.opts.model,
+        max_tokens: 16000,
+        system: this.system,
+        messages: this.messages,
+        cache_control: { type: 'ephemeral' },
+        output_config: { effort: this.opts.effort, format: { type: 'json_schema', schema: ACTION_SCHEMA } },
+      }, { ...this.opts.createOpts, purpose: this.opts.purpose });
+      const u: TokenUsage = {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+        cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
+      };
+      usage = addUsage(usage, u);
+      costUsd += usageCostUsd(response.model, u);
+      if (response.stop_reason !== 'max_tokens') break;
+    }
+    if (!response || response.stop_reason === 'max_tokens') throw new PersonaTruncatedError(usage, costUsd);
 
     if (response.stop_reason === 'refusal') {
       return { action: act({ action: 'leave', note: 'persona model refused' }), usage, costUsd, model: response.model, refused: true };

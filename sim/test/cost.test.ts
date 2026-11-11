@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CostMeter, priceOf, projectBatchCostUsd, serverTurnEstimateUsd, usageCostUsd } from '../cost';
+import { CostMeter, projectBatchCostUsd, serverTurnEstimateUsd, usageCostUsd } from '../cost';
+import { costOf } from '../../server/llm';
 
 describe('cost', () => {
   it('prices usage per million tokens, including cache reads and writes', () => {
@@ -7,8 +8,13 @@ describe('cost', () => {
     expect(usd).toBeCloseTo(2 + 1 + 0.2 + 2.5, 6);
   });
 
-  it('prices unknown models conservatively', () => {
-    expect(priceOf('mystery-model').input).toBeGreaterThanOrEqual(priceOf('claude-sonnet-5-5').input);
+  it('matches the spend ledger pricing (server/llm.ts costOf) and prices unknown models conservatively', () => {
+    const u = { inputTokens: 1234, outputTokens: 567, cacheReadTokens: 89, cacheWriteTokens: 10 };
+    expect(usageCostUsd('claude-haiku-5-5', u)).toBe(costOf('claude-haiku-5-5', {
+      input_tokens: 1234, output_tokens: 567, cache_read_input_tokens: 89, cache_creation_input_tokens: 10,
+    }));
+    const one = { inputTokens: 1e6, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    expect(usageCostUsd('mystery-model', one)).toBeGreaterThanOrEqual(usageCostUsd('claude-sonnet-5-5', one));
   });
 
   it('server estimate grows with turn index', () => {

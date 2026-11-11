@@ -143,7 +143,7 @@ async function main() {
   if (v['real-approval']) {
     const buyer = config.sandboxBuyers[0];
     if (!buyer) fail('--real-approval needs SANDBOX_BUYER_EMAIL / SANDBOX_BUYER_PASSWORD in .secrets/dev.keys');
-    let mod: { approveInSandbox?: (approveUrl: string, buyer: { email: string; password: string }) => Promise<unknown> };
+    let mod: { approveInSandbox?: (approveUrl: string, buyer: { email: string; password: string }) => Promise<{ approved: boolean; error?: string } | undefined> };
     try {
       // URL specifier: approver.ts is optional (Workstream B) and must not break typecheck when absent.
       mod = await import(new URL('./approver.ts', import.meta.url).href);
@@ -154,7 +154,8 @@ async function main() {
     if (typeof approve !== 'function') fail('sim/approver.ts does not export approveInSandbox(approveUrl, buyer)');
     realApproval = async (approveUrl) => {
       if (new URL(approveUrl).host !== 'www.sandbox.paypal.com') throw new Error(`refusing non-sandbox approve URL host: ${new URL(approveUrl).host}`);
-      await approve(approveUrl, buyer);
+      const r = await approve(approveUrl, buyer);
+      if (!r?.approved) throw new Error(`sandbox approval failed${r?.error ? `: ${r.error}` : ''}`);
     };
     if (concurrency > 1) console.log('  --real-approval: forcing concurrency 1');
     concurrency = 1;

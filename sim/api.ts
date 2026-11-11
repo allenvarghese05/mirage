@@ -16,10 +16,10 @@ export class ApiError extends Error {
 export class MirageApi {
   constructor(readonly baseUrl: string, private readonly fetchImpl: typeof fetch = fetch) {}
 
-  private async req<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  private async req<T>(method: 'GET' | 'POST', path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
     const res = await this.fetchImpl(new URL(path, this.baseUrl), {
       method,
-      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
@@ -36,8 +36,9 @@ export class MirageApi {
   sendMessage(sessionId: string, content: string) {
     return this.req<SendMessageRes>('POST', `/api/sessions/${encodeURIComponent(sessionId)}/messages`, { content });
   }
-  checkout(body: CheckoutReq) {
-    return this.req<CheckoutRes>('POST', '/api/checkout', body);
+  /** realPaypal: ask for a real sandbox PayPal order (header x-mirage-real-paypal: 1), used with --real-approval. */
+  checkout(body: CheckoutReq, opts: { realPaypal?: boolean } = {}) {
+    return this.req<CheckoutRes>('POST', '/api/checkout', body, opts.realPaypal ? { 'x-mirage-real-paypal': '1' } : {});
   }
   approved(orderId: string, body: ApprovedReq) {
     return this.req<ApprovedRes>('POST', `/api/checkout/${encodeURIComponent(orderId)}/approved`, body);

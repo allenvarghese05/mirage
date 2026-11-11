@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { STORES } from '../server/catalog';
 import type { PayerIdentity, ScoreboardSummary, SimRun, StoreId, StoreMode } from '../shared/types';
 import type { MirageApi } from './api';
-import type { BrainFactory } from './brain';
+import { PersonaTruncatedError, type BrainFactory } from './brain';
 import { emptyUsage, addUsage, serverTurnEstimateUsd, type CostMeter } from './cost';
 import { computeSimRun, summarize } from './metrics';
 import { BudgetExceededError } from '../server/llm';
@@ -54,7 +54,8 @@ export function planRuns({ batchId, personas, storeModes, runsPerMode, stores = 
       const index = plans.length;
       plans.push({
         runId: `${batchId}-${String(index + 1).padStart(4, '0')}-${nonce}`,
-        batchId, index, persona, storeId, storeMode, payer: makePayer(batchId, index),
+        // Nonce in the payer seed: re-running a batch name never reuses payers already on the block list.
+        batchId, index, persona, storeId, storeMode, payer: makePayer(`${batchId}-${nonce}`, index),
       });
     }
   }
@@ -68,7 +69,7 @@ export interface RunDeps {
   maxTurns: number;
   /** For the server-side cost estimate. */
   models: { storeAgent: string; classifier: string };
-  /** When set, approve on real sandbox PayPal instead of passing a simulated payer. */
+  /** When set, approve on real sandbox PayPal instead of passing a simulated payer. Must throw if not approved. */
   realApproval?: (approveUrl: string) => Promise<void>;
   /** White-box dossier text (only given to white-box personas). */
   dossier?: string;
@@ -108,6 +109,15 @@ export async function runOne(plan: RunPlan, deps: RunDeps): Promise<RunRecord> {
           // Shared hard spend cap (server/llm.ts ledger). Nothing was sent; stop this run and the batch.
           rec.endReason = 'budget_abort';
           rec.error = e.message;
+          break;
+        }
+        if (e instanceof PersonaTruncatedError) {
+          // Truncated twice: this run is unusable, but the batch can go on. Count the spend.
+          rec.personaUsage = addUsage(rec.personaUsage, e.usage);
+          rec.costUsd.persona += e.costUsd;
+          meter.addPersona(e.costUsd);
+          rec.endReason = 'persona_error';
+          rec.error = `persona LLM: ${e.message}`;
           break;
         }
         // The sim's own LLM failed: not the store's fault, so the run is excluded rather than scored.
@@ -163,13 +173,20 @@ async function checkout(plan: RunPlan, rec: RunRecord, items: { productId: strin
   rec.endReason = 'checkout';
   rec.checkout = { req: { sessionId: rec.sessionId, items, ...(code ? { code } : {}) } };
   try {
-    rec.checkout.res = await deps.api.checkout(rec.checkout.req);
+    // Real approval needs a real sandbox PayPal order, so ask the server for one explicitly.
+    rec.checkout.res = await deps.api.checkout(rec.checkout.req, { realPaypal: !!deps.realApproval });
     if (deps.realApproval) {
-      await deps.realApproval(rec.checkout.res.approveUrl);
+      await deps.realApproval(rec.checkout.res.approveUrl); // throws unless the buyer actually approved
       rec.checkout.approved = await deps.api.approved(rec.checkout.res.orderId, { sessionId: rec.sessionId });
     } else {
       rec.checkout.payer = plan.payer;
       rec.checkout.approved = await deps.api.approved(rec.checkout.res.orderId, { sessionId: rec.sessionId, simulatedPayer: plan.payer });
+      if (rec.checkout.approved.status === 'AWAITING_APPROVAL') {
+        // The server ignored simulatedPayer: every run would be wrong the same way, so stop the batch.
+        rec.endReason = 'harness_error';
+        rec.fatal = true;
+        rec.error = 'order still AWAITING_APPROVAL after simulated approval: server not running with MIRAGE_SIM=1?';
+      }
     }
   } catch (e) {
     rec.checkout.error = errMsg(e);
@@ -209,7 +226,7 @@ export interface BatchResult {
   budgetStop?: string;
 }
 
-const EXCLUDED_REASONS = new Set(['persona_refused', 'persona_error', 'budget_abort']);
+const EXCLUDED_REASONS = new Set(['persona_refused', 'persona_error', 'harness_error', 'budget_abort']);
 const usd = (c: number) => `$${(c / 100).toFixed(2)}`;
 
 export async function runBatch(opts: BatchOptions): Promise<BatchResult> {

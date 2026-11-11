@@ -1,24 +1,8 @@
 // Cost guard (Workstream D). Persona-side LLM spend is measured from API usage; the store agent's spend happens
-// inside the server and is not visible over HTTP, so it is ESTIMATED per turn. Prices are USD per million tokens
-// (Anthropic first-party list prices, Nov 2026).
+// inside the server and is not visible over HTTP, so it is ESTIMATED per turn. Pricing is server/llm.ts costOf,
+// the same function the shared spend ledger uses, so sim numbers match the ledger.
+import { costOf } from '../server/llm';
 import type { TokenUsage } from './types';
-
-export interface ModelPrice { input: number; output: number; cacheRead: number; cacheWrite: number }
-
-const p = (input: number, output: number, cacheRead = input * 0.1): ModelPrice =>
-  ({ input, output, cacheRead, cacheWrite: input * 1.25 });
-
-export const PRICES: Record<string, ModelPrice> = {
-  'claude-fable-5-1': p(10, 50, 0.25),
-  'claude-opus-5-5': p(4, 20, 0.2),
-  'claude-opus-5': p(5, 25),
-  'claude-sonnet-5-5': p(2, 10, 0.2),
-  'claude-sonnet-5': p(2, 10, 0.2),
-  'claude-haiku-5-5': p(0.1, 0.5),
-  'claude-haiku-4-5': p(1, 5),
-};
-/** Unknown models are priced like Opus 5.5 so the guard errs on the expensive side. */
-export const priceOf = (model: string): ModelPrice => PRICES[model] ?? PRICES['claude-opus-5-5'];
 
 export const emptyUsage = (): TokenUsage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 
@@ -31,9 +15,14 @@ export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   };
 }
 
+/** Same pricing as the shared spend ledger (server/llm.ts costOf), so sim numbers match the ledger. */
 export function usageCostUsd(model: string, u: TokenUsage): number {
-  const pr = priceOf(model);
-  return (u.inputTokens * pr.input + u.outputTokens * pr.output + u.cacheReadTokens * pr.cacheRead + u.cacheWriteTokens * pr.cacheWrite) / 1e6;
+  return costOf(model, {
+    input_tokens: u.inputTokens,
+    output_tokens: u.outputTokens,
+    cache_read_input_tokens: u.cacheReadTokens,
+    cache_creation_input_tokens: u.cacheWriteTokens,
+  });
 }
 
 /** Assumptions for the server-side estimate (store agent tool loop + attack classifier), per shopper turn. */

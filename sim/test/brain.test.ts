@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Anthropic from '@anthropic-ai/sdk';
-import { LlmBrain, llmBrainFactory, parseAction } from '../brain';
+import { LlmBrain, llmBrainFactory, parseAction, PersonaTruncatedError } from '../brain';
 import { personaById, type PersonaContext } from '../personas';
 import { productsFor } from '../../server/catalog';
 import { config } from '../../server/config';
@@ -69,6 +69,26 @@ describe('LlmBrain', () => {
     expect(second.params.messages.slice(0, 1)).toEqual(first.params.messages);
     expect(second.params.messages.map((m: any) => m.role)).toEqual(['user', 'assistant', 'user']);
     expect(second.params.messages[2].content).toContain('LAST turn');
+  });
+
+  it('asks for 16000 max_tokens and retries once when the output is truncated', async () => {
+    const ok = { content: text({ note: '', action: 'leave', message: '', items: [], code: '' }) };
+    const { create, calls } = fakeCreate([{ stop_reason: 'max_tokens', content: [] }, ok]);
+    const brain = new LlmBrain(personaById('honest.normal_shopper')!, ctx, { model: 'claude-haiku-5-5', effort: 'low', purpose: 'sim-honest', create });
+    const r = await brain.next({ agentReply: 'Hi', turn: 1, maxTurns: 3 });
+    expect(r.action.action).toBe('leave');
+    expect(calls).toHaveLength(2);
+    expect(calls[0].params.max_tokens).toBe(16000);
+    expect(calls[1].params.messages).toEqual(calls[0].params.messages); // nothing appended between attempts
+    expect(r.costUsd).toBeCloseTo(2 * (1000 * 0.1 + 200 * 0.5 + 500 * 0.01) / 1e6, 9);
+  });
+
+  it('throws PersonaTruncatedError (with the spend) when truncated twice', async () => {
+    const { create } = fakeCreate([{ stop_reason: 'max_tokens', content: [] }, { stop_reason: 'max_tokens', content: [] }]);
+    const brain = new LlmBrain(personaById('honest.normal_shopper')!, ctx, { model: 'claude-haiku-5-5', effort: 'low', purpose: 'sim-honest', create });
+    const err = await brain.next({ agentReply: 'Hi', turn: 1, maxTurns: 3 }).catch((e) => e);
+    expect(err).toBeInstanceOf(PersonaTruncatedError);
+    expect(err.costUsd).toBeGreaterThan(0);
   });
 
   it('reports refusals', async () => {

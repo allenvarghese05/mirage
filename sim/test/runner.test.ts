@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeServer, type FakeServer } from './fakeServer';
 import { MirageApi } from '../api';
-import { act, heuristicBrainFactory, scriptedBrain, type BrainFactory } from '../brain';
+import { act, heuristicBrainFactory, PersonaTruncatedError, scriptedBrain, type BrainFactory } from '../brain';
 import { CostMeter } from '../cost';
 import { personaById, resolvePersonas } from '../personas';
 import { planRuns, runBatch, runOne, type RunDeps } from '../runner';
@@ -35,6 +35,9 @@ describe('planRuns', () => {
     expect(plans.filter((p) => p.storeMode === 'mirage').map((p) => p.persona.id))
       .toEqual(['attacker.authority', 'honest.late_refund', 'attacker.authority', 'honest.late_refund']);
     expect(new Set(plans.map((p) => p.payer.payerId)).size).toBe(8);
+    // Re-running the same batch name must not reuse payers (they may already be block-listed).
+    const again = planRuns({ batchId: 'B', personas: resolvePersonas('authority,late_refund'), storeModes: ['mirage', 'baseline'], runsPerMode: 4 });
+    expect(again.some((p, i) => p.payer.payerId === plans[i].payer.payerId)).toBe(false);
     expect(new Set(plans.map((p) => p.runId)).size).toBe(8);
     expect(plans.filter((p) => p.persona.id === 'honest.late_refund').every((p) => p.storeId === 'northpeak')).toBe(true);
     expect(new Set(plans.filter((p) => p.persona.id === 'attacker.authority').map((p) => p.storeId))).toEqual(new Set(['northpeak', 'driftwood']));
@@ -76,6 +79,21 @@ describe('runOne', () => {
     expect(rec.endReason).toBe('checkout');
     expect(urls[0]).toMatch(/^https:\/\/www\.sandbox\.paypal\.com\//);
     expect(srv.approvals[0]).toEqual({ sessionId: rec.sessionId });
+    expect(srv.checkoutHeaders[0]['x-mirage-real-paypal']).toBe('1');
+  });
+
+  it('simulated checkouts do not ask for a real PayPal order', async () => {
+    const [plan] = planRuns({ batchId: 'B', personas: resolvePersonas('normal_shopper'), storeModes: ['mirage'], runsPerMode: 1 });
+    await runOne(plan, deps());
+    expect(srv.checkoutHeaders[0]['x-mirage-real-paypal']).toBeUndefined();
+  });
+
+  it('a failed real approval is an error, and /approved is not called', async () => {
+    const [plan] = planRuns({ batchId: 'B', personas: resolvePersonas('normal_shopper'), storeModes: ['mirage'], runsPerMode: 1 });
+    const rec = await runOne(plan, deps({ realApproval: async () => { throw new Error('sandbox approval failed: login timeout'); } }));
+    expect(rec).toMatchObject({ endReason: 'error' });
+    expect(rec.checkout?.error).toMatch(/sandbox approval failed/);
+    expect(srv.approvals).toHaveLength(0);
   });
 
   it('records server errors instead of throwing', async () => {
@@ -197,5 +215,32 @@ describe('runBatch', () => {
     expect(res.aborted).toBe(true);
     expect(res.fatal).toMatch(/usage limits/);
     expect(res.excluded[0].reason).toMatch(/^persona_error: persona LLM: You have reached/);
+  });
+
+  it('stops fatally when the server ignores simulatedPayer (not running with MIRAGE_SIM=1)', async () => {
+    srv = await startFakeServer({ noSimMode: true });
+    const res = await runBatch({
+      ...deps({ api: new MirageApi(srv.baseUrl, srv.fetch) }), batchId: 'nosim', personas: resolvePersonas('normal_shopper'),
+      storeModes: ['mirage'], runsPerMode: 4, concurrency: 1, outDir,
+    });
+    expect(res.records).toHaveLength(1);
+    expect(res.simRuns).toHaveLength(0);
+    expect(res.fatal).toMatch(/MIRAGE_SIM=1/);
+    expect(res.excluded[0].reason).toMatch(/^harness_error/);
+  });
+
+  it('excludes a run whose persona output was truncated twice, without stopping the batch', async () => {
+    const truncated: BrainFactory = () => ({
+      next: async () => { throw new PersonaTruncatedError({ inputTokens: 10, outputTokens: 16000, cacheReadTokens: 0, cacheWriteTokens: 0 }, 0.016); },
+    });
+    const meter = new CostMeter(5);
+    const res = await runBatch({
+      ...deps({ brainFactory: truncated, meter }), batchId: 'trunc', personas: resolvePersonas('normal_shopper'),
+      storeModes: ['mirage'], runsPerMode: 3, concurrency: 1, outDir,
+    });
+    expect(res.records).toHaveLength(3);
+    expect(res.fatal).toBeUndefined();
+    expect(res.excluded.map((e) => e.reason.split(':')[0])).toEqual(['persona_error', 'persona_error', 'persona_error']);
+    expect(meter.persona).toBeCloseTo(0.048, 9);
   });
 });
