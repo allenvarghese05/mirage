@@ -45,11 +45,11 @@ async function waitForText(text: string, timeout = 4000) {
 }
 
 const routes: [string, string[]][] = [
-  ['/', ['Let them steal.', 'Security console']],
+  ['/', ['Let them steal.', 'Merchant console']],
   ['/store/northpeak', ['Gear for cold mornings.', 'Ridgeline Insulated Jacket', 'Juniper']],
   ['/store/driftwood', ['Slow mornings, made properly.', 'Burr Hand Grinder', 'Ollie']],
   ['/store/northpeak/order/5UX02847KD392514M', ['Order received', 'pending review. You have not been charged.']],
-  ['/dashboard', ['Alarm feed', 'Devin Marsh', 'signature valid', 'What we sent PayPal Risk', 'Network']],
+  ['/dashboard', ['Alerts', 'Devin Marsh', 'signature valid', 'Sent to PayPal Risk', 'Network']],
   ['/scoreboard', ['Normal store', 'Mirage', 'run_001', 'White-box only']],
   ['/demo?session=ses_np_7f3a00a7&view=split&t=200&autoplay=0', ['Order held. Never captured.', 'Decoy kit planted for chat #A7', 'Mock data']],
   ['/demo?session=ses_np_7f3a00a7&view=attacker&t=10&autoplay=0', ['Juniper', 'REWIND']],

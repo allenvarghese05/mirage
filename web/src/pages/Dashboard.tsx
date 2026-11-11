@@ -5,7 +5,7 @@ import type { Severity, TripEvent } from '../../../shared/types';
 import { api, type StreamStatus } from '../api/client';
 import { ConsoleTopbar, chime } from '../console/Chrome';
 import {
-  AlarmFeed, DecoyKitView, RedemptionTrace, IdentityCard, NetworkView, OrdersView, Panel, Playbook, RiskView, SpreadMap, Transcript,
+  AlarmFeed, DecoyKitView, RedemptionTrace, IdentityCard, NetworkView, OrdersView, Panel, Playbook, RiskView, SpreadMap, Trace, Transcript,
 } from '../console/Panels';
 import { kindMeta, STORE_NAMES, chatLabel, eventHeadline, learnFromEvents, registerSessionCode, relTime, sessionDecoyCode } from '../lib/format';
 import '../styles/console.css';
@@ -153,45 +153,48 @@ export function Dashboard() {
   return (
     <div className="console">
       <ConsoleTopbar>
-        <span className={`c-live st-${stream}`}><i />{stream === 'live' ? 'LIVE' : stream === 'mock' ? 'LIVE · MOCK' : stream === 'connecting' ? 'CONNECTING' : 'RECONNECTING'}</span>
+        <span className={`c-live st-${stream}`}><i />{stream === 'live' ? 'Live' : stream === 'mock' ? 'Live (mock)' : stream === 'connecting' ? 'Connecting' : 'Reconnecting'}</span>
         <button type="button" className={`c-btn c-btn--ghost c-sound${sound ? ' on' : ''}`} onClick={toggleSound} aria-pressed={sound}>
-          {sound ? '♪ Sound on' : '♪ Sound off'}
+          {sound ? 'Sound on' : 'Sound off'}
         </button>
       </ConsoleTopbar>
 
       <div className="c-stats">
-        <Stat label="Alarms" value={stats.alarms} />
-        <Stat label="Chats in shadow mode" value={stats.shadow} tone="honey" />
-        <Stat label="Identities captured" value={stats.identities} tone="identity" />
-        <Stat label="Orders held" value={stats.held} />
+        <Stat label="Alerts" value={stats.alarms} />
+        <Stat label="Chats in shadow mode" value={stats.shadow} />
+        <Stat label="Attackers identified by PayPal" value={stats.identities} tone="identity" />
+        <Stat label="Orders held for review" value={stats.held} />
         <Stat label="Real secrets in Mirage agents" value={0} tone="ok" big />
-        <Stat label="Auto-charged on trapped orders" value="$0" tone="ok" big />
+        <Stat label="Charged on trapped orders" value="$0" tone="ok" big />
       </div>
 
       {error && <div className="c-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
 
       <div className="c-grid">
-        <Panel title="Alarm feed" kicker={`${events.length} events`} className="c-col-feed">
+        <Panel title="Alerts" kicker={`${events.length} events, newest first`} className="c-col-feed">
           <AlarmFeed events={events} selectedSession={selected} onSelect={select} freshIds={fresh} />
         </Panel>
 
         <div className="c-col-detail">
-          <section className="c-panel c-session-head">
-            {detail ? (
-              <>
-                <div>
-                  <span className="c-kicker">{STORE_NAMES[detail.storeId]} · {detail.storeMode === 'baseline' ? 'baseline store (real secrets)' : 'protected by Mirage'}</span>
-                  <h2>{label} <span className="mono c-dim">{detail.sessionId}</span></h2>
-                </div>
-                <div className="c-session-badges">
-                  <span className={`c-badge mode-${detail.mode}`}>{detail.mode === 'shadow' ? 'SHADOW MODE' : 'NORMAL'}</span>
-                  {sessionMeta && <span className="c-badge">{relTime(sessionMeta.startedAt)}</span>}
-                  <select value={selected ?? ''} onChange={(e) => select(e.target.value)} className="c-select" aria-label="Choose chat">
-                    {sessions.map((s) => <option key={s.sessionId} value={s.sessionId}>{chatLabel(s.sessionId)} · {s.storeId} · {s.topSeverity ?? 'quiet'}</option>)}
-                  </select>
-                </div>
-              </>
-            ) : <p className="c-empty">{selected ? 'Loading chat…' : 'Select an alarm to open its chat.'}</p>}
+          <section className="c-panel">
+            <div className="c-session-head">
+              {detail ? (
+                <>
+                  <div>
+                    <span className="c-kicker">{STORE_NAMES[detail.storeId]} · {detail.storeMode === 'baseline' ? 'comparison store (real secrets)' : 'protected by Mirage'}</span>
+                    <h2>{label} <span className="mono c-dim">{detail.sessionId}</span></h2>
+                  </div>
+                  <div className="c-session-badges">
+                    {(detail.storeMode === 'baseline' || detail.mode === 'shadow') && <span className={`c-badge mode-${detail.storeMode === 'baseline' ? 'baseline' : detail.mode}`}>{detail.storeMode === 'baseline' ? 'Comparison store' : 'Shadow mode'}</span>}
+                    {sessionMeta && <span className="c-badge">{relTime(sessionMeta.startedAt)}</span>}
+                    <select value={selected ?? ''} onChange={(e) => select(e.target.value)} className="c-select" aria-label="Choose chat">
+                      {sessions.map((s) => <option key={s.sessionId} value={s.sessionId}>{chatLabel(s.sessionId)} · {s.storeId} · {s.topSeverity ?? 'quiet'}</option>)}
+                    </select>
+                  </div>
+                </>
+              ) : <p className="c-empty">{selected ? 'Loading chat…' : 'Select an alert to open its chat.'}</p>}
+            </div>
+            {detail && <div style={{ borderTop: '1px solid var(--c-line)' }} key={detail.sessionId}><Trace detail={detail} /></div>}
           </section>
 
           {detail && (
@@ -200,22 +203,24 @@ export function Dashboard() {
                 <Transcript detail={detail} />
               </Panel>
               <div className="c-detail-side">
+                {detail.identity && (
+                  <Panel title="Who it was" kicker="Payer details from PayPal" className="c-glow-identity">
+                    <IdentityCard identity={detail.identity} storeId={detail.storeId} network={networkHit} showHistory />
+                  </Panel>
+                )}
                 {redemption && (
-                  <Panel title="Code trace" kicker="where the leak came from" className="c-glow-honey">
+                  <Panel title="Where the code came from" kicker="Every decoy is signed to one chat" className="c-glow-honey">
                     <RedemptionTrace e={redemption} />
                   </Panel>
                 )}
-                <Panel title="Identity" kicker="revealed by PayPal" className={detail.identity ? 'c-glow-identity' : ''}>
-                  <IdentityCard identity={detail.identity} storeId={detail.storeId} network={networkHit} showHistory />
-                </Panel>
-                <Panel title="Orders" kicker="human review">
+                <Panel title="Orders" kicker="Trapped orders wait for a human">
                   <OrdersView orders={detail.orders} onReview={review} busy={busy} />
                 </Panel>
-                <Panel title="Playbook" kicker="techniques, in order">
-                  <Playbook playbook={detail.playbook} events={detail.events} />
-                </Panel>
-                <Panel title="Decoy kit" kicker="what we planted">
+                <Panel title="What we planted" kicker="Fakes unique to this chat">
                   <DecoyKitView kit={detail.decoys} storeId={detail.storeId} label={label} />
+                </Panel>
+                <Panel title="Techniques tried" kicker="In order">
+                  <Playbook playbook={detail.playbook} events={detail.events} />
                 </Panel>
               </div>
             </div>
@@ -223,15 +228,18 @@ export function Dashboard() {
         </div>
 
         <div className="c-col-side">
-          <Panel title="Leak spread" kicker="source → redeemers">
-            <SpreadMap spread={spread} />
-          </Panel>
-          <Panel title="Network" kicker="shared block list">
+          <Panel title="Network" kicker="One store's trap protects the others">
             <NetworkView network={network} highlightPayer={detail?.identity?.payerId} />
           </Panel>
-          <Panel title="What we sent PayPal Risk" kicker="risk context payloads">
-            <RiskView risk={risk} />
+          <Panel title="Leak spread" kicker="Who used codes from this chat">
+            <SpreadMap spread={spread} />
           </Panel>
+          <details className="c-more">
+            <summary>Sent to PayPal Risk <span>risk context payloads</span></summary>
+            <div className="c-more-body">
+              <div className="c-panel-body"><RiskView risk={risk} /></div>
+            </div>
+          </details>
         </div>
       </div>
 

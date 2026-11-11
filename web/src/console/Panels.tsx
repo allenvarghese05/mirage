@@ -16,13 +16,57 @@ export function Panel({ title, kicker, children, className = '', right }: {
     <section className={`c-panel ${className}`}>
       <header className="c-panel-head">
         <div>
-          {kicker && <span className="c-kicker">{kicker}</span>}
           <h3>{title}</h3>
+          {kicker && <span className="c-kicker">{kicker}</span>}
         </div>
         {right}
       </header>
       <div className="c-panel-body">{children}</div>
     </section>
+  );
+}
+
+// ------------------------------------------------------------ the trace (attempt > leak > redeemed > identified > held)
+export function Trace({ detail }: { detail: SessionDetailRes }) {
+  const ev = detail.events;
+  const first = (k: string, pred: (e: TripEvent) => boolean = () => true) => ev.find((e) => e.kind === k && pred(e));
+  if (detail.storeMode === 'baseline') {
+    const lost = detail.orders.filter((o) => o.codeUsed && o.status === 'COMPLETED');
+    return (
+      <p className="trace-note">
+        <span className="c-badge mode-baseline">Comparison store</span>
+        <span>This agent holds the <b>real</b> codes and working staff tools. There is no trap and nothing to trace{lost.length ? <>: {lost.length} order{lost.length > 1 ? 's' : ''} went through at a staff discount.</> : '.'}</span>
+      </p>
+    );
+  }
+  const attempt = first('ATTACK_ATTEMPT');
+  const leak = first('DECOY_LEAKED') ?? first('HONEY_TOOL_CALLED');
+  const redeemed = first('DECOY_REDEEMED', (e) => Boolean(e.detail?.orderId)) ?? first('DECOY_REDEEMED');
+  const identified = first('IDENTITY_CAPTURED') ?? first('NETWORK_MATCH');
+  const held = first('ORDER_HELD');
+  if (!attempt && !leak && !redeemed) {
+    return <p className="trace-note"><span className="c-badge">Quiet</span><span>No attack in this chat. Nothing was flagged.</span></p>;
+  }
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  const leakCode = str(leak?.detail?.decoyCode) || str(leak?.detail?.toolName);
+  const heldOrder = detail.orders.find((o) => o.trapped);
+  const steps: { tone: string; label: string; done: boolean; sub: string; mono?: boolean }[] = [
+    { tone: 'attempt', label: 'Attack attempt', done: Boolean(attempt), sub: attempt ? techniqueLabel(attempt.detail?.technique) : 'None yet' },
+    { tone: 'leak', label: 'Fake secret handed out', done: Boolean(leak), sub: leak ? (leakCode ? prettyCode(leakCode) : 'decoy') : 'Agent gave nothing away', mono: Boolean(leakCode) },
+    { tone: 'honey', label: 'Used at PayPal checkout', done: Boolean(redeemed), sub: redeemed ? `Traced to ${chatLabel(str(redeemed.detail?.sourceSessionId) || detail.sessionId)}` : 'Not used yet' },
+    { tone: 'identity', label: 'Identified by PayPal', done: Boolean(identified || detail.identity), sub: detail.identity?.name ?? (identified ? 'Payer on file' : 'After checkout approval') },
+    { tone: 'held', label: 'Held, $0 charged', done: Boolean(held), sub: held ? (heldOrder ? `${moneyExact(heldOrder.totalCents)} never captured` : 'Never captured') : 'Nothing to hold' },
+  ];
+  return (
+    <div className="trace" role="list" aria-label="What happened in this chat">
+      {steps.map((s, i) => (
+        <div key={s.label} role="listitem" className={`trace-step tone-${s.tone}${s.done ? ' is-done' : ''}`} style={{ '--i': i } as React.CSSProperties}>
+          <div className="trace-rail"><span className="trace-dot" aria-hidden="true" /></div>
+          <span className="trace-label">{s.label}<span className="sr-only">{s.done ? ' (done)' : ' (not reached)'}</span></span>
+          <span className={`trace-sub${s.mono ? ' mono' : ''}`}>{s.sub}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 

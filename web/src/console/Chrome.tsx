@@ -18,13 +18,14 @@ export function ConsoleTopbar({ children }: { children?: React.ReactNode }) {
   const mock = isMock();
   return (
     <header className="c-top">
-      <Link to="/" className="c-brand"><MirageLogo /><span className="c-brand-sub">security console</span></Link>
+      <Link to="/" className="c-brand"><MirageLogo /><span className="c-brand-sub">Merchant console</span></Link>
       <nav className="c-nav">
         <NavLink to="/dashboard">Console</NavLink>
         <NavLink to="/scoreboard">Scoreboard</NavLink>
         <NavLink to="/demo">Replay</NavLink>
-        <NavLink to="/store/northpeak">Northpeak ↗</NavLink>
-        <NavLink to="/store/driftwood">Driftwood ↗</NavLink>
+        <span className="c-nav-sep" aria-hidden="true" />
+        <NavLink to="/store/northpeak">Northpeak store</NavLink>
+        <NavLink to="/store/driftwood">Driftwood store</NavLink>
       </nav>
       <div className="c-top-right">
         {mock && <span className="c-mock-tag" title="Remove ?mock=1 (or add ?mock=0) to use the live server">MOCK DATA</span>}

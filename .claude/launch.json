@@ -8,6 +8,12 @@
       "port": 5173
     },
     {
+      "name": "mirage-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:web"],
+      "port": 5173
+    },
+    {
       "name": "mirage-dev",
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "PORT=8787 npm run dev"],
