@@ -3,14 +3,15 @@ import express from 'express';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config } from './config';
-import { createApp } from './app';
+import { createApp, startupProblems } from './app';
 import { getDb } from './db';
 import { fakeLlmEnabled } from './agent/llm';
 
-// Hard rule 2: sandbox only.
-const paypalHost = (() => { try { return new URL(config.paypal.base).host; } catch { return ''; } })();
-if (paypalHost !== 'api-m.sandbox.paypal.com') {
-  console.error(`Refusing to start: PAYPAL_BASE must be the PayPal sandbox (got host "${paypalHost}").`);
+// Hard rule 2 (sandbox only) and a real decoy secret in production.
+const problems = startupProblems(config);
+for (const w of problems.warnings) console.warn(`\n⚠️  WARNING: ${w}\n`);
+if (problems.fatal.length) {
+  for (const f of problems.fatal) console.error(`Refusing to start: ${f}`);
   process.exit(1);
 }
 

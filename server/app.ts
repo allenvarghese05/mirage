@@ -1,14 +1,34 @@
 // Express app factory (used by server/index.ts and by supertest).
 import express, { type ErrorRequestHandler } from 'express';
+import type { config as appConfig } from './config';
 import { checkoutRouter } from './routes/checkout';
 import { webhookRouter } from './routes/webhook';
 import { chatRouter } from './routes/chat';
 import { dashboardRouter } from './routes/dashboard';
 
+export const DEV_DECOY_SECRET = 'dev-only-insecure-decoy-secret-change-me';
+
+/** Checks run before listening. fatal = refuse to start; warnings = log loudly. */
+export function startupProblems(cfg: typeof appConfig, nodeEnv = process.env.NODE_ENV): { fatal: string[]; warnings: string[] } {
+  const fatal: string[] = [];
+  const warnings: string[] = [];
+  let host = '';
+  try { host = new URL(cfg.paypal.base).host; } catch { /* invalid URL */ }
+  if (host !== 'api-m.sandbox.paypal.com') fatal.push(`PAYPAL_BASE must be the PayPal sandbox (got host "${host}").`);
+  const weakSecret = !cfg.decoySecret || cfg.decoySecret === DEV_DECOY_SECRET || cfg.decoySecret.length < 16;
+  if (weakSecret) {
+    const msg = 'MIRAGE_DECOY_SECRET is the dev-only default (or too short): anyone who knows it can forge self-tracing decoy codes. Set a long random value in .secrets/dev.keys.';
+    if (nodeEnv === 'production') fatal.push(msg); else warnings.push(msg);
+  }
+  return { fatal, warnings };
+}
+
 export function createApp(): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
+  // Sim batches can be large; this route-level parser runs first (the global one then skips the parsed body).
+  app.post('/api/dashboard/sim-runs', express.json({ limit: '5mb' }));
   app.use(express.json({ limit: '1mb' }));
 
   // Workstream B first: its routes (checkout, approval, order status, webhook, capture-capable review) take precedence.

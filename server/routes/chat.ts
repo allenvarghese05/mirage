@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { config } from '../config';
 import { STORES, productsFor } from '../catalog';
 import { runAgentTurn, SessionNotFoundError, startSession } from '../agent/storeAgent';
-import type { CreateSessionRes, ListProductsRes, SendMessageRes } from '../../shared/api';
+import type { CreateSessionRes, ListProductsRes, PublicConfigRes, SendMessageRes } from '../../shared/api';
 import type { StoreId } from '../../shared/types';
 
 export const chatRouter = Router();
@@ -19,10 +19,11 @@ const createSessionSchema = z.object({
 const sendMessageSchema = z.object({ content: z.string().trim().min(1).max(4000) });
 
 chatRouter.get('/api/config/public', (_req, res) => {
-  res.json({
+  const body: PublicConfigRes = {
     paypalClientId: config.paypal.clientId,
     stores: Object.values(STORES).map((s) => ({ id: s.id, name: s.name, tagline: s.tagline, agentName: s.agentName })),
-  });
+  };
+  res.json(body);
 });
 
 chatRouter.get('/api/stores/:storeId/products', (req, res) => {

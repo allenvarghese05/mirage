@@ -8,6 +8,8 @@ import { createFakeLlm } from './agent/fakeLlm';
 import { emit } from './mirage/tripwire';
 import { SECRETS, STORES } from './catalog';
 import { summarise } from './routes/dashboard';
+import { startupProblems } from './app';
+import { config } from './config';
 import type { SimRun, TripEvent } from '../shared/types';
 
 beforeEach(() => { resetDb(); setLlmClient(createFakeLlm()); });
@@ -123,6 +125,7 @@ describe('dashboard API', () => {
     expect(detail.messages.some((m: { role: string }) => m.role === 'tool')).toBe(true);
     expect(detail.playbook.map((p: { technique: string }) => p.technique)).toEqual(['injection', 'refund_fraud']);
     expect(detail.identity).toBeNull();
+    expect(detail.refunds).toMatchObject([{ orderRef: 'NP-12345', amountCents: 8000, kind: 'shadow', executed: false }]);
     expect((await request(app()).get('/api/dashboard/sessions/nope')).status).toBe(404);
   });
 
@@ -193,6 +196,15 @@ describe('dashboard API', () => {
     expect(summarise([]).map((s) => s.storeMode).sort()).toEqual(['baseline', 'mirage']);
   });
 
+  it('accepts sim-run batches larger than the 1mb default body limit', async () => {
+    const run = { batchId: 'big', storeMode: 'mirage', storeId: 'northpeak', persona: 'attacker.authority'.padEnd(400, 'x'), isAttack: true, createdAt: '2026-11-10T00:00:00.000Z' };
+    const runs = Array.from({ length: 3000 }, (_, i) => ({ ...run, id: `r${i}` }));
+    expect(JSON.stringify({ runs }).length).toBeGreaterThan(1_100_000);
+    const res = await request(app()).post('/api/dashboard/sim-runs').send({ runs });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ inserted: 3000 });
+  });
+
   it('streams tripwire events over SSE', async () => {
     const server = createApp().listen(0);
     try {
@@ -215,5 +227,20 @@ describe('dashboard API', () => {
       server.closeAllConnections();
       server.close();
     }
+  });
+});
+
+describe('startupProblems', () => {
+  const sandbox = 'https://api-m.sandbox.paypal.com';
+  it('refuses a non-sandbox PayPal base everywhere', () => {
+    expect(startupProblems({ ...config, paypal: { ...config.paypal, base: 'https://api-m.paypal.com' } }, 'development').fatal[0]).toMatch(/sandbox/);
+  });
+  it('refuses the dev-only decoy secret in production, warns loudly in dev', () => {
+    const dev = { ...config, decoySecret: 'dev-only-insecure-decoy-secret-change-me', paypal: { ...config.paypal, base: sandbox } };
+    expect(startupProblems(dev, 'production').fatal.join(' ')).toMatch(/MIRAGE_DECOY_SECRET/);
+    const inDev = startupProblems(dev, 'development');
+    expect(inDev.fatal).toEqual([]);
+    expect(inDev.warnings.join(' ')).toMatch(/MIRAGE_DECOY_SECRET/);
+    expect(startupProblems({ ...dev, decoySecret: 'a-real-long-random-secret-value-123456' }, 'production')).toEqual({ fatal: [], warnings: [] });
   });
 });

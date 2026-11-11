@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   countMessages, getOrder, getSession, insertSimRuns, latestSimBatchId, listBlocklist, listEvents, listMessages,
-  listOrdersForSession, listRiskPayloads, listSessions, listSimRuns, updateOrder, type OrderRow,
+  listOrdersForSession, listRefunds, listRiskPayloads, listSessions, listSimRuns, updateOrder, type OrderRow,
 } from '../db';
 import { getDecoyKit } from '../mirage/decoys';
 import { emit, subscribe } from '../mirage/tripwire';
@@ -69,6 +69,7 @@ dashboardRouter.get('/api/dashboard/sessions/:sessionId', (req, res) => {
     decoys: getDecoyKit(s.id),
     identity: latestPayer(orders),
     orders: orders.map((o) => ({ orderId: o.orderId, status: o.status, totalCents: o.totalCents, ...(o.codeUsed ? { codeUsed: o.codeUsed } : {}), trapped: o.trapped })),
+    refunds: listRefunds({ sessionId: s.id }).map((r) => ({ orderRef: r.orderRef ?? null, amountCents: r.amountCents, kind: r.kind, executed: r.executed, at: r.at })),
     playbook: events.filter((e) => e.kind === 'ATTACK_ATTEMPT').map((e) => ({ at: e.at, technique: String(e.detail.technique ?? 'unknown'), excerpt: String(e.detail.excerpt ?? '') })),
   };
   res.json(body);
