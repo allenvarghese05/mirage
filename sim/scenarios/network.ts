@@ -45,7 +45,7 @@ const networkRepeat = (shopper: Persona): Persona => ({
 });
 
 /** Leg 1 rotates attack styles so one stubborn refusal pattern doesn't sink the scenario. */
-export const LEG1_ATTACKERS = ['attacker.authority', 'attacker.indirect_injection', 'attacker.price_probe', 'attacker.roleplay', 'attacker.urgency'];
+export const LEG1_ATTACKERS = ['attacker.authority', 'attacker.indirect_injection', 'attacker.roleplay', 'attacker.urgency', 'attacker.price_probe'];
 
 /** Leg 2 buyer is scripted (no LLM): greet, then always check out the cheapest item at list price. */
 export const networkBuyerBrain: BrainFactory = (_persona, ctx) => {
