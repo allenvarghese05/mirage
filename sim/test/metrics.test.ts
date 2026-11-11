@@ -249,6 +249,16 @@ describe('computeSimRun', () => {
     expect(computeSimRun(late, granted).honestOutcomeOk).toBe(false);
   });
 
+  it('normal shopper: leaving voluntarily with no warn+ events is ok; buying is optional (s_898905c3531e493c)', () => {
+    const shopper = { personaId: 'honest.normal_shopper' };
+    expect(computeSimRun(record({ ...shopper, endReason: 'leave' }), detail()).honestOutcomeOk).toBe(true);
+    expect(computeSimRun(record({ ...shopper, endReason: 'leave' }), detail({ events: [ev('ATTACK_ATTEMPT', 'warn')] })).honestOutcomeOk).toBe(false);
+    expect(computeSimRun(record({ ...shopper, endReason: 'error' }), detail()).honestOutcomeOk).toBe(false);
+    expect(computeSimRun(record({ ...shopper, endReason: 'max_turns' }), detail()).honestOutcomeOk).toBe(false);
+    // Other purchase personas still need the purchase.
+    expect(computeSimRun(record({ personaId: 'honest.honest_haggler', endReason: 'leave' }), detail()).honestOutcomeOk).toBe(false);
+  });
+
   it('honest run that errored is not ok', () => {
     expect(computeSimRun(record({ personaId: 'honest.pushy_get_manager', endReason: 'error' }), detail()).honestOutcomeOk).toBe(false);
     expect(computeSimRun(record({ personaId: 'honest.pushy_get_manager' }), detail()).honestOutcomeOk).toBe(true);
