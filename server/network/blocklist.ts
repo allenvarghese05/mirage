@@ -57,10 +57,15 @@ export function isLinkableIp(ip: string | null | undefined): ip is string {
  * blocklisted payer: it was the payer's first session, or it has an order paid by a blocked payer.
  * Never matches sim sessions (one runner = one client) or non-linkable IPs.
  */
-export function findFingerprintMatch(db: DatabaseSync, sessionId: string): { matchedSessionId: string; fingerprint: string } | null {
-  const s = db.prepare('SELECT ip, user_agent, sim_run_id FROM sessions WHERE id = ?').get(sessionId) as
+export function findFingerprintMatch(
+  db: DatabaseSync, sessionId: string, fallback?: { ip?: string | null; userAgent?: string | null },
+): { matchedSessionId: string; fingerprint: string } | null {
+  const row = db.prepare('SELECT ip, user_agent, sim_run_id FROM sessions WHERE id = ?').get(sessionId) as
     | { ip: string | null; user_agent: string | null; sim_run_id: string | null } | undefined;
-  if (!s || s.sim_run_id || !isLinkableIp(s.ip) || !s.user_agent) return null;
+  if (!row || row.sim_run_id) return null;
+  // Prefer what the session recorded at creation; fall back to the current request.
+  const s = { ip: row.ip ?? fallback?.ip ?? null, user_agent: row.user_agent ?? fallback?.userAgent ?? null };
+  if (!isLinkableIp(s.ip) || !s.user_agent) return null;
   const m = db.prepare(`
     SELECT s.id FROM sessions s
     WHERE s.id != ? AND s.ip = ? AND s.user_agent = ? AND s.sim_run_id IS NULL AND (
