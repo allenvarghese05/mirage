@@ -46,6 +46,9 @@ export type OrderStatusRes = PublicOrderStatus;
 
 // POST /api/paypal/webhook  (PayPal -> us; signature verified when PAYPAL_WEBHOOK_ID is set)
 
+// GET /api/config/public   (never secrets)
+export type PublicConfigRes = { paypalClientId: string; stores: { id: StoreId; name: string; tagline: string; agentName: string }[] };
+
 // ---------- Dashboard (merchant-facing; no auth in the hackathon build, bound to localhost/demo) ----------
 
 // GET /api/dashboard/events?since=ISO
@@ -71,6 +74,8 @@ export type SessionDetailRes = {
   identity: PayerIdentity | null;
   orders: { orderId: string; status: PublicOrderStatus['status']; totalCents: number; codeUsed?: string; trapped: boolean }[];
   playbook: { at: string; technique: string; excerpt: string }[];
+  /** Refund records for this session (policy = honest path, shadow = honey/trapped, baseline_override = comparison store). */
+  refunds?: { orderRef: string | null; amountCents: number; kind: 'policy' | 'shadow' | 'baseline_override'; executed: boolean; at: string }[];
 };
 
 // GET /api/dashboard/spread/:sessionId   -> who used decoys that leaked from this session
@@ -91,6 +96,11 @@ export type ReviewRes = PublicOrderStatus;
 
 // GET /api/dashboard/scoreboard?batchId=
 export type ScoreboardRes = { batchId: string | null; runs: SimRun[]; summary: ScoreboardSummary[] };
+
+// GET /api/dashboard/payers/:payerId/history   (PayPal Agent Toolkit list_transactions + local orders; shape owned by B)
+
+// POST /api/dashboard/sim-runs
+export type SimRunsReq = { runs: SimRun[] };
 
 // GET /api/dashboard/risk-payloads   -> STC payloads we sent / would send to PayPal risk
 export type RiskPayloadsRes = { payloads: { at: string; orderId?: string; sessionId: string; ok: boolean; httpStatus?: number; body: Record<string, unknown> }[] };
