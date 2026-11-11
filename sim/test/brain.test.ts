@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,11 +30,7 @@ function fakeCreate(responses: Partial<Anthropic.Message>[]) {
   return { create, calls };
 }
 
-// server/llm.ts getClient() requires a key even when a test client is injected. Use a dummy placeholder for
-// the duration of these tests so they pass in keyless checkouts; the injected mock never sends it anywhere.
-const realKey = config.anthropicKey;
-beforeEach(() => { config.anthropicKey = realKey || 'test-placeholder-not-a-key'; });
-afterEach(() => { __setClientForTests(null); config.anthropicKey = realKey; });
+afterEach(() => __setClientForTests(null));
 
 describe('parseAction', () => {
   it('accepts a well-formed action', () => {

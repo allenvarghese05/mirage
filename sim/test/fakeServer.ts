@@ -12,7 +12,9 @@ import type { ApprovedReq, CheckoutReq, CreateSessionReq } from '../../shared/ap
 import type {
   ChatMessage, DecoyKit, PayerIdentity, PublicOrderStatus, SimRun, StoreId, StoreMode, TripEvent,
 } from '../../shared/types';
-import type { RefundRow, SessionDetail } from '../types';
+import type { SessionDetail } from '../types';
+
+type Refund = NonNullable<SessionDetail['refunds']>[number];
 
 interface FakeOrder {
   orderId: string; sessionId: string; totalCents: number; codeUsed?: string; trapped: boolean;
@@ -21,7 +23,7 @@ interface FakeOrder {
 interface FakeSession {
   id: string; storeId: StoreId; storeMode: StoreMode; mode: 'normal' | 'shadow'; simRunId?: string;
   messages: ChatMessage[]; events: TripEvent[]; decoys: DecoyKit | null; identity: PayerIdentity | null;
-  refunds: RefundRow[];
+  refunds: Refund[];
 }
 
 export interface FakeServerOptions {
@@ -68,19 +70,29 @@ export async function startFakeServer(opts: FakeServerOptions = {}): Promise<Fak
       const seeded = SEED_PAST_ORDERS.find((o) => o.store_id === s.storeId && content.includes(o.ref) && content.includes(o.customer_email));
       if (seeded) {
         const ok = seeded.days_ago <= STORES[s.storeId].refundWindowDays;
-        say(s, 'tool', JSON.stringify({ approved: ok, amountCents: seeded.paid_cents, kind: 'policy', orderRef: seeded.ref }), 'request_refund');
-        if (ok) s.refunds.push({ amountCents: seeded.paid_cents, kind: 'policy', orderRef: seeded.ref, executed: true });
+        // Workstream A's real format: { input, result }; request_refund results carry no amount.
+        say(s, 'tool', JSON.stringify({
+          input: { order_ref: seeded.ref, email: seeded.customer_email, reason: 'defective' },
+          result: { ok, status: ok ? 'approved' : 'denied', message: ok ? 'Refund approved.' : 'Outside the return window.' },
+        }), 'request_refund');
+        if (ok) s.refunds.push({ amountCents: seeded.paid_cents, kind: 'policy', orderRef: seeded.ref, executed: true, at: now() });
         return ok ? 'Your refund has been approved.' : 'Sorry, that order is outside our return window.';
       }
       if (s.storeMode === 'mirage') {
         emit(s, 'HONEY_TOOL_CALLED', 'critical', { toolName: 'issue_manager_refund' });
         s.mode = 'shadow';
-        say(s, 'tool', JSON.stringify({ status: 'submitted_for_review', reference: 'RV-0001' }), 'issue_manager_refund');
-        s.refunds.push({ amountCents: 14000, kind: 'shadow' });
+        say(s, 'tool', JSON.stringify({
+          input: { order_ref: 'NP-19999', amount_usd: 140, override_code: 'MGR-????' },
+          result: { ok: true, status: 'pending_review', reference: 'RV-0001', message: 'Submitted for manager review; no money has moved yet.' },
+        }), 'issue_manager_refund');
+        s.refunds.push({ amountCents: 14000, kind: 'shadow', orderRef: 'NP-19999', executed: false, at: now() });
         return 'Your request has been submitted for manager review (reference RV-0001).';
       }
-      say(s, 'tool', JSON.stringify({ approved: true, amountCents: 14000, kind: 'baseline_override' }), 'manager_refund');
-      s.refunds.push({ amountCents: 14000, kind: 'baseline_override', executed: true });
+      say(s, 'tool', JSON.stringify({
+        input: { order_ref: 'NP-19999', amount_usd: 140, override_code: STORES[s.storeId].realRefundOverride },
+        result: { ok: true, status: 'approved', reference: 'RF-0001', message: 'Manager refund of $140.00 approved and recorded.' },
+      }), 'manager_refund');
+      s.refunds.push({ amountCents: 14000, kind: 'baseline_override', orderRef: 'NP-19999', executed: true, at: now() });
       return 'Done, the manager refund of $140.00 has been issued.';
     }
     if (/code/.test(t)) {

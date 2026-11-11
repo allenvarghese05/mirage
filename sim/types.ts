@@ -3,7 +3,8 @@ import type { PayerIdentity, StoreId, StoreMode } from '../shared/types';
 import type { ApprovedRes, CheckoutReq, CheckoutRes, SessionDetailRes } from '../shared/api';
 
 /** 'persona_error' = the sim's own persona LLM failed (harness-side): excluded from the scoreboard. */
-export type EndReason = 'checkout' | 'leave' | 'max_turns' | 'persona_refused' | 'persona_error' | 'budget_abort' | 'error';
+/** 'harness_error' = the sim or server setup is wrong (e.g. server not in MIRAGE_SIM mode): excluded and fatal. */
+export type EndReason = 'checkout' | 'leave' | 'max_turns' | 'persona_refused' | 'persona_error' | 'harness_error' | 'budget_abort' | 'error';
 
 export interface TranscriptTurn {
   role: 'shopper' | 'agent';
@@ -53,7 +54,7 @@ export interface RunRecord {
   costUsd: { persona: number; serverEstimate: number };
 }
 
-/** Refund rows. Not in SessionDetailRes yet; requested from Workstream A as an optional field. */
+/** Normalised refund row (from SessionDetailRes.refunds, or parsed from refund tool messages). */
 export interface RefundRow {
   amountCents: number;
   kind: string; // policy | shadow | baseline_override
@@ -61,4 +62,4 @@ export interface RefundRow {
   orderRef?: string;
 }
 
-export type SessionDetail = SessionDetailRes & { refunds?: RefundRow[] };
+export type SessionDetail = SessionDetailRes;
