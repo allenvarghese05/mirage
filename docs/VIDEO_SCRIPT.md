@@ -154,6 +154,14 @@ Preview each before using; pick the one that fits. Download the HD (1920×1080) 
 
 Color: desaturate B-roll slightly and keep it a little dark so the bright app shots feel like the "reveal".
 
+**Swaps (the original B4 and B6 picks are vertical phone videos, unusable at 16:9):**
+B4 → https://www.pexels.com/video/people-at-the-coffee-shop-854110/ · B6 → the Death Valley road (heat shimmer) above.
+
+**Direct HD files (landscape, 1080p).** One command downloads all nine into `media/broll/` (gitignored):
+```bash
+mkdir -p media/broll && cd media/broll && curl -L --fail -o B1_hooded-hacker-typing.mp4 https://videos.pexels.com/video-files/36036808/15283094_1920_1080_60fps.mp4 -o B2_typing-in-the-dark.mp4 https://videos.pexels.com/video-files/5289120/5289120-hd_1920_1080_30fps.mp4 -o B3_woman-buying-online.mp4 https://videos.pexels.com/video-files/5981981/5981981-hd_2048_1080_25fps.mp4 -o B4_people-at-coffee-shop.mp4 https://videos.pexels.com/video-files/854110/854110-hd_1920_1080_25fps.mp4 -o B5_fishing-lure-on-hook.mp4 https://videos.pexels.com/video-files/6506673/6506673-hd_2048_1080_25fps.mp4 -o B6_death-valley-road-heat.mp4 https://videos.pexels.com/video-files/7895641/7895641-hd_1920_1080_30fps.mp4 -o B7_padlock-black.mp4 https://videos.pexels.com/video-files/10241357/10241357-hd_1920_1080_24fps.mp4 -o B8_paying-online-laptop.mp4 https://videos.pexels.com/video-files/6607111/6607111-hd_1920_1080_24fps.mp4 -o B9_blue-cables.mp4 https://videos.pexels.com/video-files/1085656/1085656-hd_1920_1080_25fps.mp4
+```
+
 ---
 
 ## 6. Text cards and graphics (make in the editor)
