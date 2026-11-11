@@ -1,4 +1,6 @@
 // npm run sim -- --help
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { config } from '../server/config';
 import { spentUsd } from '../server/llm';
@@ -10,15 +12,17 @@ import { buildDossier } from './dossier';
 import { resolvePersonas } from './personas';
 import { planRuns, runBatch } from './runner';
 import { runNetworkScenario } from './scenarios/network';
+import { rescoreBatch } from './rescore';
 
 const HELP = `Mirage sim harness: runs attacker and honest personas against the store over its HTTP API.
 
 Usage:
   npm run sim -- --batch <name> [options]
   npm run sim -- --scenario network [options]
+  npm run sim -- --rescore <batch> [--base-url <url>] [--out-dir <dir>] [--no-post]
 
 Exit codes: 0 ok, 1 network scenario failed, 2 bad arguments / server unreachable, 3 spend limit reached,
-            4 persona LLM unusable (bad key, usage limit).
+            4 persona LLM unusable (bad key, usage limit), 5 rescore kept some runs unchanged.
 
 Options:
   --batch <name>          Batch id (default: batch-<timestamp>). Output: data/sim-runs-<batch>.json
@@ -39,6 +43,8 @@ Options:
   --real-approval         Approve on real sandbox PayPal via sim/approver.ts (slow; forces concurrency 1)
   --base-url <url>        Server URL (default http://localhost:8787)
   --scenario network      Dev attacks Northpeak, then the same payer shops at Driftwood -> NETWORK_MATCH
+  --rescore <batch>       Recompute every run in data/sim-runs-<batch>.json from the server's stored sessions
+                          with the current metrics (NO LLM calls), rewrite the file and re-POST the runs.
   --out-dir <dir>         Output directory (default data)
   --no-post               Don't POST results to /api/dashboard/sim-runs
   --dry-run               Print the plan and projected cost, call nothing
@@ -80,11 +86,31 @@ async function main() {
       batch: { type: 'string' }, runs: { type: 'string' }, 'store-mode': { type: 'string' }, personas: { type: 'string' },
       stores: { type: 'string' }, concurrency: { type: 'string' }, 'max-turns': { type: 'string' }, 'budget-usd': { type: 'string' },
       brain: { type: 'string' }, 'real-approval': { type: 'boolean' }, 'base-url': { type: 'string' }, scenario: { type: 'string' },
-      'out-dir': { type: 'string' }, 'no-post': { type: 'boolean' }, 'dry-run': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+      'out-dir': { type: 'string' }, 'no-post': { type: 'boolean' }, 'dry-run': { type: 'boolean' }, rescore: { type: 'string' }, help: { type: 'boolean', short: 'h' },
     },
     strict: true,
   });
   if (v.help) return void console.log(HELP);
+
+  if (v.rescore !== undefined) {
+    if (!/^[\w-]+$/.test(v.rescore)) fail('--rescore takes a batch name (letters, digits, _ and -)');
+    const file = join(v['out-dir'] ?? 'data', `sim-runs-${v.rescore}.json`);
+    if (!existsSync(file)) fail(`no batch file ${file}`);
+    const baseUrl = v['base-url'] ?? `http://localhost:${config.port}`;
+    console.log(`Rescoring ${file} from ${baseUrl} (no LLM calls)`);
+    const res = await rescoreBatch({ api: new MirageApi(baseUrl), file, post: !v['no-post'] });
+    console.log('\nBefore:');
+    printSummary(res.before);
+    console.log('After:');
+    printSummary(res.after);
+    for (const c of res.changes) {
+      console.log(`  ${c.sessionId} ${c.persona}: ${Object.entries(c.fields).map(([k, [a, b]]) => `${k} ${JSON.stringify(a)} -> ${JSON.stringify(b)}`).join(', ')}`);
+    }
+    for (const k of res.kept) console.log(`  kept as-is ${k.id}: ${k.reason}`);
+    console.log(`Wrote ${file} | posted to dashboard: ${res.posted.ok ? 'yes' : `no (${res.posted.error ?? res.posted.status})`}`);
+    if (res.kept.length) process.exitCode = 5;
+    return;
+  }
 
   const batchId = v.batch ?? `batch-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
   if (!/^[\w-]+$/.test(batchId)) fail('--batch may only contain letters, digits, _ and -');

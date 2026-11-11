@@ -36,7 +36,7 @@ export interface NetworkScenarioResult {
 }
 
 /** How leg 2 is scored: an attack (the payer is a known attacker), even though Dev behaves like a normal shopper. */
-const networkRepeat = (shopper: Persona): Persona => ({
+export const networkRepeat = (shopper: Persona): Persona => ({
   ...shopper,
   id: 'attacker.network_repeat',
   kind: 'attacker',
