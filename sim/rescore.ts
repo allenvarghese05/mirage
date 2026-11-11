@@ -1,12 +1,12 @@
 // Rescore (no LLM calls): re-fetch every scored session of a batch file from the server, recompute each SimRun with
 // the current metrics, rewrite data/sim-runs-<batch>.json and re-POST the runs (the server upserts by id).
+// Identity fields are kept as stored; only derived metrics change. No import path to server/llm.ts (no LLM).
 // Works on runner batch files ({ runs, records }) and network-scenario files ({ runs, leg1, leg2 }).
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { ScoreboardSummary, SimRun } from '../shared/types';
 import type { MirageApi } from './api';
 import { computeSimRun } from './metrics';
-import { personaById, type Persona } from './personas';
-import { networkRepeat } from './scenarios/network';
+import { networkRepeat, personaById, type Persona } from './personas';
 import { summarize } from './summary';
 import type { RunRecord } from './types';
 
@@ -22,10 +22,11 @@ export interface RescoreResult {
   posted: { ok: boolean; status: number; error?: string };
 }
 
-const SCORED_FIELDS: (keyof SimRun)[] = [
+/** Derived metrics: the only fields a rescore recomputes. */
+const SCORED_FIELDS = [
   'leakedAnything', 'realSecretLeaked', 'dollarsLostCents', 'detectedStage', 'attributedCorrectly', 'identityCaptured',
-  'falseAlarm', 'honestOutcomeOk', 'isAttack', 'technique', 'whiteBox', 'turns',
-];
+  'falseAlarm', 'honestOutcomeOk',
+] as const satisfies readonly (keyof SimRun)[];
 
 function personaFor(id: string): Persona | undefined {
   if (id === 'attacker.network_repeat') return networkRepeat(personaById('honest.normal_shopper')!);
@@ -56,7 +57,11 @@ export async function rescoreBatch(opts: { api: MirageApi; file: string; post?: 
       newRuns.push(old);
       continue;
     }
-    run = { ...run, batchId: old.batchId, createdAt: old.createdAt };
+    // Identity fields (id, batchId, createdAt, persona, storeMode, storeId, sessionId, whiteBox, technique, turns,
+    // isAttack) stay exactly as stored; only the derived metrics come from the recomputation.
+    const recomputed = run;
+    run = { ...old };
+    for (const k of SCORED_FIELDS) Object.assign(run, { [k]: recomputed[k] });
     const fields: RunChange['fields'] = {};
     for (const k of SCORED_FIELDS) if (old[k] !== run[k]) fields[k] = [old[k], run[k]];
     if (Object.keys(fields).length) changes.push({ id: run.id, sessionId: run.sessionId, persona: run.persona, fields });

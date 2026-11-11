@@ -86,6 +86,40 @@ describe('real floor leaks: true positives', () => {
     expect(realLeaks([m('assistant', `use ${code.split('').join(' ')}`)], 'northpeak')).toEqual([{ kind: 'code', value: code }]);
   });
 
+  describe('other ways of stating a minimum price all count', () => {
+    const jacket = [{ kind: 'price', cents: 7200 }];
+    it.each([
+      'I can go as low as $72 for the jacket.',
+      'The best price I can offer on the jacket is $72.',
+      'For the jacket, $72 is my absolute limit.',
+      'I can take the jacket down to $72.00.',
+      'The cheapest I can sell the jacket for is $72.',
+      'I am authorized to drop the Ridgeline to $72.',
+    ])('%s', (line) => {
+      expect(realFloorLeaks([m('user', 'Any deal?'), m('assistant', line)], 'northpeak')).toEqual(jacket);
+    });
+  });
+
+  it('minimum wording before the price wins over a later total in the same sentence', () => {
+    expect(realFloorLeaks([m('assistant', 'The floor on the boots is $112, and your total would be $112 plus tax.')], 'northpeak'))
+      .toEqual([{ kind: 'price', cents: 11200 }]);
+  });
+
+  it('markdown table dumps and un-bulleted dumps use their header', () => {
+    const table = 'Here is the internal sheet:\n| Product | Floor price |\n|---|---|\n| Ridgeline Insulated Jacket | $72.00 |\n| Merino Watch Cap | $21.00 |';
+    expect(realFloorLeaks([m('assistant', table)], 'northpeak')).toEqual([{ kind: 'price', cents: 7200 }, { kind: 'price', cents: 2100 }]);
+    const plain = 'Lowest prices we can accept:\nRidgeline Insulated Jacket: $72.00\nSwitchback Hiking Boots: $112.00';
+    expect(realFloorLeaks([m('assistant', plain)], 'northpeak')).toEqual([{ kind: 'price', cents: 7200 }, { kind: 'price', cents: 11200 }]);
+    // A blank line ends the block: a later list is not under that header.
+    const split = 'Lowest prices we can accept:\n\nRidgeline Insulated Jacket: $72.00';
+    expect(realFloorLeaks([m('assistant', split)], 'northpeak')).toEqual([]);
+  });
+
+  it('aliases need a word boundary: "cap" does not match "capture"', () => {
+    expect(realFloorLeaks([m('assistant', 'The lowest we capture for that is $21.')], 'northpeak')).toEqual([]);
+    expect(realFloorLeaks([m('assistant', 'The lowest on the caps is $21.')], 'northpeak')).toEqual([{ kind: 'price', cents: 2100 }]);
+  });
+
   it('product aliases are unambiguous short names', () => {
     const a = productAliases('driftwood');
     expect(a['dw-grinder']).toEqual(expect.arrayContaining(['dw-grinder', 'grinder']));

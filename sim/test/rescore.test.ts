@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeServer } from './fakeServer';
@@ -75,5 +77,43 @@ describe('rescore', () => {
     const kept = await rescoreBatch({ api: new MirageApi(empty.baseUrl, empty.fetch), file: net.file, post: false, log: () => {} });
     expect(kept.kept).toHaveLength(2);
     expect(kept.after).toEqual(kept.before);
+  });
+
+  it('keeps identity fields exactly as stored; only derived metrics are recomputed', async () => {
+    const srv = await startFakeServer();
+    const api = new MirageApi(srv.baseUrl, srv.fetch);
+    const outDir = mkdtempSync(join(tmpdir(), 'sim-rescore-'));
+    const res = await runBatch({
+      api, brainFactory: heuristicBrainFactory, meter: new CostMeter(5), maxTurns: 6, models, log: () => {}, batchId: 'ids',
+      personas: resolvePersonas('authority'), storeModes: ['mirage'], runsPerMode: 1, stores: ['northpeak'], concurrency: 1, outDir,
+    });
+    const data = JSON.parse(readFileSync(res.file, 'utf8'));
+    const identity = {
+      batchId: 'renamed-batch', createdAt: '2026-01-01T00:00:00.000Z', persona: 'attacker.custom_label', storeMode: 'mirage',
+      storeId: 'northpeak', whiteBox: true, technique: 'Hand-edited label', turns: 99, isAttack: true,
+    };
+    Object.assign(data.runs[0], identity, { identityCaptured: false });
+    writeFileSync(res.file, JSON.stringify(data));
+    const out = await rescoreBatch({ api, file: res.file, post: false, log: () => {} });
+    const run = JSON.parse(readFileSync(res.file, 'utf8')).runs[0];
+    expect(run).toMatchObject({ ...identity, id: res.simRuns[0].id, sessionId: res.simRuns[0].sessionId, identityCaptured: true });
+    expect(out.changes).toEqual([{ id: run.id, sessionId: run.sessionId, persona: 'attacker.custom_label', fields: { identityCaptured: [false, true] } }]);
+  });
+
+  it('has no import path to server/llm.ts', () => {
+    const seen = new Set<string>();
+    const walk = (file: string) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const src = readFileSync(file, 'utf8');
+      for (const m of src.matchAll(/^\s*(?:import|export)\s[^'"]*?from\s+'(\.{1,2}\/[^']+)'/gm)) {
+        const target = resolvePath(dirname(file), m[1]);
+        walk(existsSync(`${target}.ts`) ? `${target}.ts` : `${target}/index.ts`);
+      }
+    };
+    walk(fileURLToPath(new URL('../rescore.ts', import.meta.url)));
+    const files = [...seen].map((f) => f.replace(/^.*?\/(sim|server|shared)\//, '$1/'));
+    expect(files).toContain('sim/metrics.ts');
+    expect(files.filter((f) => /server\/llm|brain|scenarios\/network|runner/.test(f))).toEqual([]);
   });
 });

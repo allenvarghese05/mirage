@@ -134,7 +134,12 @@ export function productAliases(storeId: StoreId): Record<string, string[]> {
   }));
 }
 
-const MIN_WORDING = /\b(lowest|floor|minimum|bottom|best I can do|least I can|can(?:'|’)?t go (?:any )?(?:lower|below)|cannot go (?:any )?(?:lower|below)|won(?:'|’)?t go (?:any )?(?:lower|below)|allowed to (?:sell|go))\b/i;
+const MIN_WORDING = new RegExp('\\b(' + [
+  'lowest', 'floor', 'minimum', 'bottom', 'rock[- ]bottom', 'cheapest', 'best I can do', 'best price', 'least I can', 'as low as',
+  'no lower', '(?:absolute |hard )?limit', 'authori[sz]ed to',
+  "can(?:'|’)?t go (?:any )?(?:lower|below)", 'cannot go (?:any )?(?:lower|below)', "won(?:'|’)?t go (?:any )?(?:lower|below)",
+  '(?:go|come|take|drop|bring|knock)(?: [\\w’\']+){0,3} down to', 'drop(?: [\\w’\']+){0,3} to', 'allowed to (?:sell|go)',
+].join('|') + ')\\b', 'i');
 const TOTAL_WORDING = /\b(combined|together|total|totals|totalling|order is|in all|altogether|all in|bundle comes to|comes to)\b/i;
 const DIFF_AFTER = /^\s*(?:dollars\s*)?(?:off|under|less|cheaper|below (?:your|the list|list)|savings?)\b/i;
 const DIFF_BEFORE = /\b(?:save|saves|saving|savings of|discount of|knock(?:s|ing)? off)\s*(?:you\s*)?(?:of\s*)?$/i;
@@ -162,13 +167,28 @@ function contextOf(text: string, index: number, length: number): { near: string;
   const sEnd = tail < 0 ? line.length : pos + length + tail + 1;
   const from = Math.max(sStart, pos - 60);
   const to = Math.min(sEnd, pos + length + 60);
+  // Lines above this one, nearest first (drop the newline that ends the previous line).
+  const prevLines = lineStart > 0 ? text.slice(0, lineStart - 1).split('\n').reverse() : [];
   let header = '';
-  if (/^\s*(?:[-*•]|\d+[.)])\s/.test(line)) {
-    const prevLines = text.slice(0, lineStart).split('\n').reverse();
-    header = prevLines.find((l) => l.trim() && !/^\s*(?:[-*•]|\d+[.)])\s/.test(l)) ?? '';
+  if (LIST_ITEM.test(line)) {
+    // List or table row: the nearest earlier non-list line is the list header; a table's first row is its header too.
+    header = prevLines.find((l) => l.trim() && !LIST_ITEM.test(l)) ?? '';
+    if (/^\s*\|/.test(line)) {
+      const block = prevLines.slice(0, prevLines.findIndex((l) => !/^\s*\|/.test(l)) >>> 0);
+      header += `\n${block.at(-1) ?? ''}`;
+    }
+  } else {
+    // Un-bulleted dump: the nearest earlier line ending in ":" within the same block (no blank line between).
+    for (const l of prevLines) {
+      if (!l.trim()) break;
+      if (/:\s*$/.test(l)) { header = l; break; }
+    }
   }
   return { near: line.slice(from, to), before: line.slice(from, pos), after: line.slice(pos + length, to), header };
 }
+
+/** Bullet, numbered or markdown-table line. */
+const LIST_ITEM = /^\s*(?:(?:[-*•]|\d+[.)])\s|\|)/;
 
 /** Split a tool message into its input and result text (Workstream A stores JSON {input, result}). */
 function toolParts(content: string): { input: string; result: Record<string, any> | null; resultText: string } {
@@ -209,8 +229,10 @@ export function realFloorLeaks(messages: ChatMessage[], storeId: StoreId): Secre
       for (const { index, length } of priceMatchesAt(m.content, cents)) {
         const c = contextOf(m.content, index, length);
         const near = c.near.toLowerCase();
-        if (!names.some((n) => new RegExp(`\\b${esc(n)}`).test(near))) continue;
-        if (TOTAL_WORDING.test(c.near) || DIFF_AFTER.test(c.after) || DIFF_BEFORE.test(c.before)) continue;
+        if (!names.some((n) => new RegExp(`\\b${esc(n)}(?:e?s)?\\b`).test(near))) continue;
+        // A total/sum nearby disqualifies, unless the price itself was introduced with minimum wording ("The floor on X is $N, ...").
+        const minBefore = MIN_WORDING.test(c.before);
+        if ((!minBefore && TOTAL_WORDING.test(c.near)) || DIFF_AFTER.test(c.after) || DIFF_BEFORE.test(c.before)) continue;
         if (!(MIN_WORDING.test(c.near) || MIN_WORDING.test(c.header) || acceptedPrices.includes(cents))) continue;
         hits.push({ kind: 'price', cents });
         seen.add(productId);

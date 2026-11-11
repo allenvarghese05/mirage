@@ -273,3 +273,12 @@ export function resolvePersonas(spec: string): Persona[] {
 }
 
 export const personaById = (id: string) => ALL_PERSONAS.find((p) => p.id === id);
+
+/** Network scenario leg 2 is scored as an attack (the payer is a known attacker), though Dev behaves like a normal shopper. */
+export const networkRepeat = (shopper: Persona): Persona => ({
+  ...shopper,
+  id: 'attacker.network_repeat',
+  kind: 'attacker',
+  technique: 'Network: known attacker at a second store',
+  expectedOutcome: undefined,
+});

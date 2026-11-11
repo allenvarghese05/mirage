@@ -9,7 +9,7 @@ import { computeSimRun } from '../metrics';
 import type { PayerIdentity } from '../../shared/types';
 import { act, scriptedBrain, type BrainFactory } from '../brain';
 import { DEV_PAYER } from '../payers';
-import { personaById, type Persona } from '../personas';
+import { networkRepeat, personaById, type Persona } from '../personas';
 import { runOne, type RunDeps, type RunPlan } from '../runner';
 import type { RunRecord } from '../types';
 
@@ -35,14 +35,8 @@ export interface NetworkScenarioResult {
   file: string;
 }
 
-/** How leg 2 is scored: an attack (the payer is a known attacker), even though Dev behaves like a normal shopper. */
-export const networkRepeat = (shopper: Persona): Persona => ({
-  ...shopper,
-  id: 'attacker.network_repeat',
-  kind: 'attacker',
-  technique: 'Network: known attacker at a second store',
-  expectedOutcome: undefined,
-});
+// Leg 2 scoring persona lives in personas.ts (no LLM imports), so rescore can use it without pulling in server/llm.ts.
+export { networkRepeat };
 
 /** Leg 1 rotates attack styles so one stubborn refusal pattern doesn't sink the scenario. */
 export const LEG1_ATTACKERS = ['attacker.authority', 'attacker.indirect_injection', 'attacker.roleplay', 'attacker.urgency', 'attacker.price_probe'];
