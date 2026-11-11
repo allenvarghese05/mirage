@@ -20,7 +20,7 @@ function loadSdk(clientId: string): Promise<PayPalNamespace> {
   if (!sdkPromise) {
     sdkPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=USD&intent=capture&components=buttons`;
+      s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=USD&intent=capture&components=buttons&disable-funding=card,credit,paylater,venmo`;
       s.async = true;
       s.onload = () => (window.paypal ? resolve(window.paypal) : reject(new Error('PayPal SDK did not initialise')));
       s.onerror = () => { sdkPromise = null; reject(new Error('Could not load the PayPal SDK')); };
@@ -30,12 +30,13 @@ function loadSdk(clientId: string): Promise<PayPalNamespace> {
   return sdkPromise;
 }
 
-/** Remember which chat an order came from, so the return page can confirm approval. */
+/** Remember which chat an order came from, so the return page can confirm approval.
+ *  localStorage (not sessionStorage): the fallback link opens PayPal in a new tab, which returns in that tab. */
 export function rememberOrder(orderId: string, sessionId: string, storeId: string) {
-  try { sessionStorage.setItem(`mirage.order.${orderId}`, JSON.stringify({ sessionId, storeId })); } catch { /* ignore */ }
+  try { localStorage.setItem(`mirage.order.${orderId}`, JSON.stringify({ sessionId, storeId })); } catch { /* ignore */ }
 }
 export function recallOrder(orderId: string): { sessionId: string; storeId: string } | null {
-  try { return JSON.parse(sessionStorage.getItem(`mirage.order.${orderId}`) ?? 'null'); } catch { return null; }
+  try { return JSON.parse(localStorage.getItem(`mirage.order.${orderId}`) ?? 'null'); } catch { return null; }
 }
 
 export function PayPalCheckout({ order, sessionId, onDone }: {
@@ -46,6 +47,8 @@ export function PayPalCheckout({ order, sessionId, onDone }: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mock = isMock();
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useEffect(() => {
     let live = true;
@@ -65,7 +68,7 @@ export function PayPalCheckout({ order, sessionId, onDone }: {
         createOrder: () => order.orderId,
         onApprove: async () => {
           setBusy(true);
-          try { onDone(await api.approved(order.orderId, { sessionId })); }
+          try { onDoneRef.current(await api.approved(order.orderId, { sessionId })); }
           catch (e) { setError((e as Error).message); setBusy(false); }
         },
         onCancel: () => setError('PayPal checkout was cancelled. Your cart is still here.'),
@@ -74,11 +77,11 @@ export function PayPalCheckout({ order, sessionId, onDone }: {
       return buttons.render(box.current);
     }).catch((e: Error) => setError(e.message));
     return () => { cancelled = true; buttons?.close?.().catch(() => {}); };
-  }, [clientId, mock, order.orderId, sessionId, onDone]);
+  }, [clientId, mock, order.orderId, sessionId]);
 
   const simulateApprove = async () => {
     setBusy(true);
-    try { onDone(await api.approved(order.orderId, { sessionId })); }
+    try { onDoneRef.current(await api.approved(order.orderId, { sessionId })); }
     catch (e) { setError((e as Error).message); setBusy(false); }
   };
 

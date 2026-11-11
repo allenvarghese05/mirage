@@ -16,6 +16,14 @@ export interface PublicConfig {
   currency?: string;
 }
 
+/** GET /api/dashboard/payers/:payerId/history (B, PayPal Agent Toolkit list_transactions). Best effort. */
+export interface PayerHistory {
+  payerId: string;
+  source?: string;
+  transactions: { transactionId: string; date?: string; amountCents?: number; currency?: string; status?: string; eventCode?: string }[];
+  error?: string;
+}
+
 export type StreamStatus = 'connecting' | 'live' | 'reconnecting' | 'mock';
 
 export interface Api {
@@ -34,6 +42,7 @@ export interface Api {
   review(orderId: string, req: ReviewReq): Promise<ReviewRes>;
   scoreboard(batchId?: string): Promise<ScoreboardRes>;
   riskPayloads(): Promise<RiskPayloadsRes>;
+  payerHistory(payerId: string): Promise<PayerHistory>;
   /** Live TripEvents. Returns an unsubscribe function. */
   subscribe(onEvent: (e: TripEvent) => void, onStatus?: (s: StreamStatus) => void): () => void;
 }
@@ -64,9 +73,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   let data: unknown = null;
   try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
   if (!res.ok) {
-    const msg = (data && typeof data === 'object' && 'error' in data && typeof (data as { error: unknown }).error === 'string')
-      ? (data as { error: string }).error
-      : `Request failed (${res.status})`;
+    const d = (data && typeof data === 'object' ? data : {}) as { error?: unknown; message?: unknown };
+    const msg = typeof d.error === 'string' ? d.error : typeof d.message === 'string' ? d.message : `Request failed (${res.status})`;
     throw new ApiError(msg, res.status);
   }
   return data as T;
@@ -94,16 +102,47 @@ export const httpApi: Api = {
   review: (orderId, req) => request('POST', `/api/dashboard/review/${enc(orderId)}`, req),
   scoreboard: (batchId) => request('GET', `/api/dashboard/scoreboard${batchId ? `?batchId=${enc(batchId)}` : ''}`),
   riskPayloads: () => request('GET', '/api/dashboard/risk-payloads'),
+  payerHistory: (payerId) => request('GET', `/api/dashboard/payers/${enc(payerId)}/history`),
   subscribe(onEvent, onStatus) {
     if (typeof EventSource === 'undefined') return () => {};
-    onStatus?.('connecting');
-    const es = new EventSource('/api/dashboard/stream');
-    es.onopen = () => onStatus?.('live');
-    es.onerror = () => onStatus?.('reconnecting');
-    es.onmessage = (m) => {
-      try { onEvent(JSON.parse(m.data) as TripEvent); } catch { /* ignore keep-alives */ }
+    // EventSource retries by itself while CONNECTING; once it gives up (CLOSED) we reconnect with backoff,
+    // then backfill anything missed via GET /events?since=<last seen> (callers dedupe by id).
+    let es: EventSource | null = null;
+    let closed = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    let delay = 1000;
+    let lastSeenAt: string | null = null;
+    let hadConnection = false;
+    const deliver = (e: TripEvent) => {
+      if (!lastSeenAt || e.at > lastSeenAt) lastSeenAt = e.at;
+      onEvent(e);
     };
-    return () => es.close();
+    const connect = () => {
+      if (closed) return;
+      onStatus?.(hadConnection ? 'reconnecting' : 'connecting');
+      es = new EventSource('/api/dashboard/stream');
+      es.onopen = () => {
+        onStatus?.('live');
+        delay = 1000;
+        if (hadConnection && lastSeenAt) {
+          httpApi.events(lastSeenAt).then((r) => r.events.forEach(deliver)).catch(() => {});
+        }
+        hadConnection = true;
+      };
+      es.onerror = () => {
+        onStatus?.('reconnecting');
+        if (es && es.readyState === EventSource.CLOSED && !closed) {
+          es.close();
+          retry = setTimeout(connect, delay);
+          delay = Math.min(delay * 2, 10_000);
+        }
+      };
+      es.onmessage = (m) => {
+        try { deliver(JSON.parse(m.data) as TripEvent); } catch { /* ignore keep-alives */ }
+      };
+    };
+    connect();
+    return () => { closed = true; if (retry) clearTimeout(retry); es?.close(); };
   },
 };
 

@@ -9,8 +9,8 @@ import { AgentAvatar, ChatLog, type ChatLine } from '../store/ChatLog';
 import { ProductArt } from '../store/ProductArt';
 import { MirageLogo } from '../console/Chrome';
 import { IdentityCard, PRODUCT_NAMES, RedemptionTrace } from '../console/Panels';
-import { buildTimeline, revealAt, type ReplayItem } from '../lib/replay';
-import { KIND_META, STORE_NAMES, chatLabel, decodeCode, eventHeadline, learnFromEvents, money, moneyExact, parseFloorCode, registerSessionCode, sessionDecoyCode, shortDate } from '../lib/format';
+import { buildTimeline, findInjections, revealAt, type ReplayItem } from '../lib/replay';
+import { kindMeta, STORE_NAMES, chatLabel, decodeCode, eventHeadline, learnFromEvents, money, moneyExact, parseFloorCode, registerSessionCode, sessionDecoyCode, shortDate } from '../lib/format';
 import '../styles/store.css';
 import '../styles/console.css';
 import '../styles/demo.css';
@@ -66,6 +66,8 @@ export function Demo() {
   const [playing, setPlaying] = useState(false);
   const [rewinding, setRewinding] = useState(false);
   const nowRef = useRef(startAt);
+  const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (resumeTimer.current) clearTimeout(resumeTimer.current); }, []);
   const total = timeline?.total ?? 1;
   useEffect(() => {
     if (timeline && nowRef.current > timeline.total) { nowRef.current = timeline.total; setNow(timeline.total); }
@@ -94,7 +96,7 @@ export function Demo() {
         if (p >= 1) {
           setRewinding(false);
           setParam('view', 'split');
-          setTimeout(() => setPlaying(true), 700);
+          resumeTimer.current = setTimeout(() => setPlaying(true), 700);
           return;
         }
       } else {
@@ -108,8 +110,8 @@ export function Demo() {
     return () => cancelAnimationFrame(raf);
   }, [playing, rewinding, speed, total, setParam]);
 
-  const restart = () => { nowRef.current = 0; setNow(0); setPlaying(true); };
-  const rewind = () => { setPlaying(false); setRewinding(true); };
+  const restart = useCallback(() => { nowRef.current = 0; setNow(0); setPlaying(true); }, []);
+  const rewind = useCallback(() => { setPlaying(false); setRewinding(true); }, []);
   const seek = (v: number) => { nowRef.current = v; setNow(v); };
 
   // keyboard: space play/pause, R rewind, 0 restart
@@ -122,7 +124,7 @@ export function Demo() {
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  });
+  }, [rewind, restart]);
 
   if (error) return <div className="demo demo-msg"><p>{error}</p><Link to="/">← Mirage</Link></div>;
   if (!detail || !timeline) return <div className="demo demo-msg"><p>Loading replay…</p></div>;
@@ -174,8 +176,7 @@ export function Demo() {
 function marksFor(m: { role: string; content: string }, decoys: SessionDetailRes['decoys']): ChatLine['marks'] {
   const out: NonNullable<ChatLine['marks']> = [];
   if (m.role === 'user') {
-    const inj = m.content.match(/\[[^\]]*(ignore|instruction|system|assistant)[^\]]*\]/i);
-    if (inj) out.push({ text: inj[0], kind: 'inject' });
+    for (const t of findInjections(m.content)) out.push({ text: t, kind: 'inject' });
   } else if (m.role === 'assistant') {
     if (decoys) {
       for (const c of [decoys.staffCode, decoys.refundOverrideCode]) if (m.content.includes(c)) out.push({ text: c, kind: 'score' });
@@ -222,6 +223,8 @@ function AttackerView({ detail, items, now, orderMsgs, listPrices, split }: {
   const code = order?.codeUsed;
   const staffCode = decodeCode(code) ? code : undefined;
   const pct = staffCode ? STAFF_PCT[detail.storeId] : 0;
+  // B labels the refund-override decoy "Manager pricing (N% off)" at checkout
+  const isManagerCode = !!staffCode && (staffCode === detail.decoys?.refundOverrideCode || /-MGR-/i.test(staffCode));
   const total = order?.totalCents ?? 0;
   const subtotal = floor ? (listPrices[floor.productId] ?? total) : pct ? Math.round(total / (1 - pct / 100)) : total;
   const status = order ? orderMsgs[order.orderId] : undefined;
@@ -253,7 +256,7 @@ function AttackerView({ detail, items, now, orderMsgs, listPrices, split }: {
                 {subtotal > total && <s>{moneyExact(subtotal)}</s>}
                 <b>{moneyExact(total)}</b>
               </div>
-              {staffCode && pct > 0 && <p className="da-label">Staff pricing ({pct}% off)</p>}
+              {staffCode && pct > 0 && <p className="da-label">{isManagerCode ? 'Manager pricing' : 'Staff pricing'} ({pct}% off)</p>}
               {floor && <p className="da-label">Price agreed in chat</p>}
               {!(statusAt !== undefined && now >= statusAt) && (
                 <div className={`paypal-sim-btn da-pp${identity && now >= identity.t - 1800 ? ' is-busy' : ''}`}>
@@ -289,7 +292,8 @@ function ConsoleView({ detail, items, now }: { detail: SessionDetailRes; items: 
   const held = events.find((e) => e.kind === 'ORDER_HELD');
   const leaked = events.some((e) => e.kind === 'DECOY_LEAKED');
   const floorOrder = detail.orders.map((o) => parseFloorCode(o.codeUsed)).find(Boolean);
-  const product = floorOrder?.productId ?? Object.keys(detail.decoys?.fakeFloorCents ?? {})[0];
+  const leakedProduct = detail.events.find((e) => e.kind === 'DECOY_LEAKED' && typeof e.detail.productId === 'string')?.detail.productId as string | undefined;
+  const product = leakedProduct ?? floorOrder?.productId ?? Object.keys(detail.decoys?.fakeFloorCents ?? {})[0];
   const toolCalls = items.filter((it) => it.kind === 'msg' && it.m.role === 'tool' && it.t <= now && detail.decoys?.honeyTools.includes(it.m.toolName ?? ''));
 
   return (
@@ -350,7 +354,7 @@ function ConsoleView({ detail, items, now }: { detail: SessionDetailRes; items: 
 }
 
 function FeedRow({ e }: { e: TripEvent }) {
-  const meta = KIND_META[e.kind];
+  const meta = kindMeta(e.kind);
   const h = eventHeadline(e);
   return (
     <li className={`dc-row tone-${meta.tone}`}>

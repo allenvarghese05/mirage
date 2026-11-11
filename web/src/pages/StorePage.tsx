@@ -67,10 +67,13 @@ function Store({ storeId, cancelled }: { storeId: StoreId; cancelled?: boolean }
   }, [storeId, brand]);
 
   const count = Object.values(cart).reduce((a, b) => a + b, 0);
+  const addedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (addedTimer.current) clearTimeout(addedTimer.current); }, []);
   const add = (id: string) => {
     setCart((c) => ({ ...c, [id]: (c[id] ?? 0) + 1 }));
     setJustAdded(id);
-    setTimeout(() => setJustAdded((x) => (x === id ? null : x)), 1400);
+    if (addedTimer.current) clearTimeout(addedTimer.current);
+    addedTimer.current = setTimeout(() => setJustAdded(null), 1400);
   };
 
   const onDone = useCallback((status: ApprovedRes, orderId: string) => {
@@ -206,6 +209,8 @@ function CartDrawer({ open, onClose, brand, products, cart, setCart, sessionId, 
     }
   };
 
+  const orderId = order?.orderId;
+  const handleDone = useCallback((s: ApprovedRes) => { if (orderId) onDone(s, orderId); }, [onDone, orderId]);
   const bump = (id: string, d: number) => setCart((c) => ({ ...c, [id]: Math.max(0, (c[id] ?? 0) + d) }));
 
   return (
@@ -239,7 +244,8 @@ function CartDrawer({ open, onClose, brand, products, cart, setCart, sessionId, 
             <label className="promo">
               <span>{brand.promoHint}</span>
               <div className="promo-row">
-                <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter code" spellCheck={false} autoCapitalize="characters" />
+                <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter code" spellCheck={false} autoCapitalize="characters" readOnly={!!order} />
+                {order && <button type="button" className="promo-change" onClick={() => setOrder(null)}>{code.trim() ? 'Change code' : 'Add code'}</button>}
               </div>
             </label>
             <div className="cart-totals">
@@ -256,7 +262,7 @@ function CartDrawer({ open, onClose, brand, products, cart, setCart, sessionId, 
             {order && code.trim() && !order.discountLabel && <p className="checkout-error" role="status">That code wasn't applied. You'll pay the regular price.</p>}
             {error && <p className="checkout-error" role="alert">{error}</p>}
             {order && sessionId ? (
-              <PayPalCheckout order={order} sessionId={sessionId} onDone={(s) => onDone(s, order.orderId)} />
+              <PayPalCheckout order={order} sessionId={sessionId} onDone={handleDone} />
             ) : (
               <button type="button" className="btn-checkout" onClick={checkout} disabled={busy}>
                 {busy ? 'Preparing checkout…' : code.trim() ? 'Apply code & check out' : 'Check out'}

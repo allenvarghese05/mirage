@@ -1,5 +1,6 @@
 import { Suspense, lazy } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Home } from './pages/Home';
 import { StorePage } from './pages/StorePage';
 import { OrderStatusPage } from './pages/OrderStatusPage';
@@ -10,7 +11,9 @@ import { Demo } from './pages/Demo';
 const Scoreboard = lazy(() => import('./pages/Scoreboard').then((m) => ({ default: m.Scoreboard })));
 
 export function App() {
+  const { pathname } = useLocation();
   return (
+    <ErrorBoundary resetKey={pathname}>
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/store/:storeId" element={<StorePage />} />
@@ -21,5 +24,6 @@ export function App() {
       <Route path="/demo" element={<Demo />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </ErrorBoundary>
   );
 }

@@ -7,7 +7,7 @@ import { ConsoleTopbar, chime } from '../console/Chrome';
 import {
   AlarmFeed, DecoyKitView, RedemptionTrace, IdentityCard, NetworkView, OrdersView, Panel, Playbook, RiskView, SpreadMap, Transcript,
 } from '../console/Panels';
-import { KIND_META, STORE_NAMES, chatLabel, eventHeadline, learnFromEvents, registerSessionCode, relTime, sessionDecoyCode } from '../lib/format';
+import { kindMeta, STORE_NAMES, chatLabel, eventHeadline, learnFromEvents, registerSessionCode, relTime, sessionDecoyCode } from '../lib/format';
 import '../styles/console.css';
 
 const RANK: Record<Severity, number> = { info: 0, warn: 1, high: 2, critical: 3 };
@@ -67,29 +67,47 @@ export function Dashboard() {
     return () => { live = false; };
   }, [refreshSide, select]);
 
-  // live stream
+  // live stream. Refreshes it triggers are coalesced (about 1 s), so a burst of events costs one round of requests.
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const later = useCallback((fn: () => void, ms: number) => {
+    const t = setTimeout(() => { timers.current.delete(t); fn(); }, ms);
+    timers.current.add(t);
+  }, []);
+  useEffect(() => () => { timers.current.forEach(clearTimeout); timers.current.clear(); }, []);
+  const pending = useRef({ detail: false, side: false, sessions: false, scheduled: false });
+
   useEffect(() => {
+    const flush = () => {
+      const p = pending.current;
+      if (p.detail && selectedRef.current) loadDetailRef.current(selectedRef.current);
+      if (p.side) refreshSide();
+      else if (p.sessions) api.sessions().then((r) => setSessions(r.sessions)).catch(() => {});
+      pending.current = { detail: false, side: false, sessions: false, scheduled: false };
+    };
     return api.subscribe((e) => {
       learnFromEvents([e]);
       setEvents((prev) => (prev.some((x) => x.id === e.id) ? prev : [...prev, e]));
       setFresh((s) => new Set(s).add(e.id));
-      setTimeout(() => setFresh((s) => { const n = new Set(s); n.delete(e.id); return n; }), 2400);
+      later(() => setFresh((s) => { const n = new Set(s); n.delete(e.id); return n; }), 2400);
       if (e.severity === 'critical') {
         setToasts((t) => [...t.slice(-2), { id: e.id, e }]);
-        setTimeout(() => setToasts((t) => t.filter((x) => x.id !== e.id)), 6000);
+        later(() => setToasts((t) => t.filter((x) => x.id !== e.id)), 6000);
         if (soundRef.current) chime(e.kind === 'IDENTITY_CAPTURED' || e.kind === 'NETWORK_MATCH' ? 'identity' : 'critical');
       }
-      if (e.sessionId === selectedRef.current) loadDetail(e.sessionId);
-      if (['IDENTITY_CAPTURED', 'NETWORK_MATCH', 'RISK_SIGNAL_SENT', 'DECOY_REDEEMED', 'ORDER_HELD', 'REVIEW_DECISION'].includes(e.kind)) refreshSide();
-      else api.sessions().then((r) => setSessions(r.sessions)).catch(() => {});
+      const p = pending.current;
+      if (e.sessionId === selectedRef.current) p.detail = true;
+      if (['IDENTITY_CAPTURED', 'NETWORK_MATCH', 'RISK_SIGNAL_SENT', 'DECOY_REDEEMED', 'ORDER_HELD', 'REVIEW_DECISION'].includes(e.kind)) p.side = true;
+      else p.sessions = true;
+      if (!p.scheduled) { p.scheduled = true; later(flush, 1000); }
     }, setStream);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshSide]);
+  }, [refreshSide, later]);
 
   const loadDetail = useCallback((id: string) => {
     api.sessionDetail(id).then((d) => { registerSessionCode(d.sessionId, d.decoys?.staffCode); learnFromEvents(d.events); if (selectedRef.current === id) setDetail(d); }).catch(() => setDetail(null));
     api.spread(id).then((s) => { if (selectedRef.current === id) setSpread(s); }).catch(() => setSpread(null));
   }, []);
+  const loadDetailRef = useRef(loadDetail);
+  loadDetailRef.current = loadDetail;
 
   useEffect(() => {
     if (!selected) return;
@@ -188,7 +206,7 @@ export function Dashboard() {
                   </Panel>
                 )}
                 <Panel title="Identity" kicker="revealed by PayPal" className={detail.identity ? 'c-glow-identity' : ''}>
-                  <IdentityCard identity={detail.identity} storeId={detail.storeId} network={networkHit} />
+                  <IdentityCard identity={detail.identity} storeId={detail.storeId} network={networkHit} showHistory />
                 </Panel>
                 <Panel title="Orders" kicker="human review">
                   <OrdersView orders={detail.orders} onReview={review} busy={busy} />
@@ -221,7 +239,7 @@ export function Dashboard() {
         {toasts.map(({ id, e }) => {
           const h = eventHeadline(e);
           return (
-            <button type="button" key={id} className={`c-toast tone-${KIND_META[e.kind].tone}`} onClick={() => select(e.sessionId)}>
+            <button type="button" key={id} className={`c-toast tone-${kindMeta(e.kind).tone}`} onClick={() => select(e.sessionId)}>
               <b>{h.title}</b><span>{h.sub}</span>
             </button>
           );

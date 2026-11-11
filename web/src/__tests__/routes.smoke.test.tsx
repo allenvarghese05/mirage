@@ -59,9 +59,24 @@ const routes: [string, string[]][] = [
   // PayPal redirect return (B's return_url) lands on the order page
   ['/store/northpeak?checkout=return&token=5UX02847KD392514M&PayerID=XYZ', ['Order received', 'pending review']],
   ['/store/driftwood?checkout=cancel', ['PayPal checkout was cancelled. You have not been charged.']],
+  ['/store/northpeak/order/NOPE123', ['We could not find that order']],
+  // identity card pulls PayPal history (B's Agent Toolkit route); network panel shows plain-word reasons
+  ['/dashboard?session=ses_np_7f3a00a7', ['PayPal history', 'T0006', 'Used a fake staff code', '1 payer matched again']],
 ];
 
 describe('web routes (mock API)', () => {
+  it('survives an event kind it does not know', async () => {
+    const { mockApi } = await import('../api/mock');
+    const orig = mockApi.events;
+    mockApi.events = async () => ({ events: [{ id: 'x1', at: new Date().toISOString(), storeId: 'northpeak', sessionId: 's_00000000000000a1', kind: 'SOMETHING_NEW' as never, severity: 'warn', detail: {} }] });
+    try {
+      await render('/dashboard');
+      await waitForText('Something New');
+    } finally {
+      mockApi.events = orig;
+    }
+  });
+
   for (const [path, texts] of routes) {
     it(`renders ${path}`, async () => {
       await render(path);

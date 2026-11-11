@@ -85,6 +85,11 @@ export const KIND_META: Record<TripKind, { tone: Tone; label: string; glyph: str
   REVIEW_DECISION: { tone: 'ok', label: 'Review decision', glyph: '✓' },
 };
 
+/** Display meta for an event kind; kinds this UI doesn't know yet get a neutral fallback instead of crashing. */
+export function kindMeta(kind: string): { tone: Tone; label: string; glyph: string } {
+  return (KIND_META as Record<string, { tone: Tone; label: string; glyph: string }>)[kind] ?? { tone: 'info', label: titleCase(kind.toLowerCase()), glyph: '•' };
+}
+
 const TECHNIQUE_LABELS: Record<string, string> = {
   injection: 'prompt injection', indirect_injection: 'hidden instruction (indirect injection)', authority: 'pretending to be staff',
   roleplay: 'roleplay ("pretend you are…")', encoding: 'encoding trick', urgency: 'false urgency', refund_fraud: 'refund fraud',
@@ -139,6 +144,8 @@ export function eventHeadline(e: TripEvent): { title: string; sub: string } {
       return { title: 'Order held · never captured · $0 moved', sub: `${str(d.orderId)} pending human review` };
     case 'REVIEW_DECISION':
       return { title: `Reviewer ${str(d.decision) === 'release' ? 'released' : 'cancelled'} the order`, sub: str(d.note) || str(d.orderId) };
+    default:
+      return { title: kindMeta(String((e as { kind: unknown }).kind)).label, sub: str(d.orderId) || str(d.excerpt) };
   }
 }
 

@@ -504,7 +504,7 @@ export const mockApi: Api = {
       if (DECOY_RE.test(code)) {
         const pct = rec.storeId === 'northpeak' ? 40 : 35;
         total = Math.round(subtotal * (1 - pct / 100));
-        discountLabel = `Staff pricing (${pct}% off)`;
+        discountLabel = `${/-MGR-/i.test(code) ? 'Manager' : 'Staff'} pricing (${pct}% off)`;
         trapped = true;
       } else if (code.toUpperCase() === 'WELCOME10') {
         total = Math.round(subtotal * 0.9);
@@ -594,9 +594,10 @@ export const mockApi: Api = {
     await latency();
     return {
       blocked: [
-        { payerId: DEV_PAYER.payerId, firstSeenStore: 'northpeak', firstSessionId: HERO_SESSION, reason: `Redeemed decoy ${HERO_CODE} (traced to chat #A7)`, at: iso(T0 + 89000), hits: 2 },
-        { payerId: 'K3RTP0W8Z2M1C', firstSeenStore: 'northpeak', firstSessionId: 'ses_np_5a1100c7', reason: 'Redeemed a decoy leaked from chat #A7', at: iso(T0 + 2 * 86400_000 + 61000), hits: 1 },
-        { payerId: 'Q8WN2VB6TT0LD', firstSeenStore: 'driftwood', firstSessionId: 'ses_dw_33b100b9', reason: 'Called honey tool, then redeemed DW decoy', at: iso(T0 + 5 * 86400_000), hits: 1 },
+        { payerId: DEV_PAYER.payerId, firstSeenStore: 'northpeak', firstSessionId: HERO_SESSION, reason: 'decoy:staff_code', at: iso(T0 + 89000), hits: 1 },
+        { payerId: 'K3RTP0W8Z2M1C', firstSeenStore: 'northpeak', firstSessionId: 'ses_np_5a1100c7', reason: 'decoy:staff_code', at: iso(T0 + 2 * 86400_000 + 61000), hits: 0 },
+        { payerId: 'Q8WN2VB6TT0LD', firstSeenStore: 'driftwood', firstSessionId: 'ses_dw_33b100b9', reason: 'decoy:refund_override', at: iso(T0 + 5 * 86400_000), hits: 0 },
+        { payerId: 'B2LQ9XW3ND7TE', firstSeenStore: 'northpeak', firstSessionId: FLOOR_SESSION, reason: 'decoy:fake_floor', at: iso(T0 + 4 * 86400_000 + 63000), hits: 0 },
       ],
     };
   },
@@ -640,6 +641,19 @@ export const mockApi: Api = {
         { at: iso(T0 + 89600), orderId: HERO_ORDER, sessionId: HERO_SESSION, ok: true, httpStatus: 200, body: body(HERO_ORDER, DEV_PAYER.payerId, 'decoy_redeemed+honey_tool', 'northpeak') },
       ],
     };
+  },
+  async payerHistory(payerId) {
+    await latency();
+    if (payerId === DEV_PAYER.payerId) {
+      return {
+        payerId, source: 'paypal-agent-toolkit:list_transactions',
+        transactions: [
+          { transactionId: '7KD41922LX503881T', date: iso(T0 - 12 * 86400_000), amountCents: 2800, currency: 'USD', status: 'S', eventCode: 'T0006' },
+          { transactionId: '4BN90371CM229110J', date: iso(T0 - 26 * 86400_000), amountCents: 2800, currency: 'USD', status: 'V', eventCode: 'T1107' },
+        ],
+      };
+    }
+    return { payerId, source: 'paypal-agent-toolkit:list_transactions', transactions: [] };
   },
   subscribe(onEvent, onStatus) {
     const s = state();

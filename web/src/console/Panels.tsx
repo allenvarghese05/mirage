@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { api, type PayerHistory } from '../api/client';
 import type { SessionDetailRes, NetworkRes, RiskPayloadsRes, SpreadRes } from '../../../shared/api';
 import type { DecoyKit, PayerIdentity, StoreId, TripEvent } from '../../../shared/types';
-import { KIND_META, STORE_SHORT, chatLabel, clock, decodeCode, eventHeadline, moneyExact, parseFloorCode, prettyCode, relTime, shortDate, techniqueLabel } from '../lib/format';
+import { kindMeta, STORE_SHORT, chatLabel, clock, decodeCode, eventHeadline, moneyExact, parseFloorCode, prettyCode, relTime, shortDate, techniqueLabel } from '../lib/format';
 
 export const PRODUCT_NAMES: Record<string, string> = {
   'np-jacket': 'Ridgeline Insulated Jacket', 'np-boots': 'Switchback Hiking Boots', 'np-tent': 'Cirrus 2-Person Tent',
@@ -27,7 +28,7 @@ export function Panel({ title, kicker, children, className = '', right }: {
 
 // ------------------------------------------------------------ alarm feed
 export function AlarmRow({ e, selected, onSelect, fresh }: { e: TripEvent; selected?: boolean; onSelect?: (id: string) => void; fresh?: boolean }) {
-  const meta = KIND_META[e.kind];
+  const meta = kindMeta(e.kind);
   const h = eventHeadline(e);
   return (
     <li>
@@ -78,7 +79,7 @@ export function Transcript({ detail, maxEvents = true }: { detail: Pick<SessionD
     <ol className="transcript">
       {items.map((it) => {
         if (it.kind === 'evt') {
-          const meta = KIND_META[it.e.kind];
+          const meta = kindMeta(it.e.kind);
           return (
             <li key={it.e.id} className={`tx-event tone-${meta.tone}`}>
               <span aria-hidden="true">{meta.glyph}</span> {eventHeadline(it.e).title}
@@ -224,7 +225,7 @@ export function RedemptionTrace({ e }: { e: TripEvent }) {
 }
 
 // ------------------------------------------------------------ identity
-export function IdentityCard({ identity, storeId, network }: { identity: PayerIdentity | null; storeId?: StoreId; network?: boolean }) {
+export function IdentityCard({ identity, storeId, network, showHistory }: { identity: PayerIdentity | null; storeId?: StoreId; network?: boolean; showHistory?: boolean }) {
   if (!identity) return <p className="c-empty">No PayPal identity yet. It appears when a trapped order is approved.</p>;
   const initials = (identity.name ?? identity.payerId).split(/\s+/).map((w) => w[0]).slice(0, 2).join('');
   return (
@@ -243,6 +244,38 @@ export function IdentityCard({ identity, storeId, network }: { identity: PayerId
         <div><dt>Country</dt><dd>{identity.countryCode ?? '—'}</dd></div>
         <div><dt>Ship to</dt><dd>{identity.shippingAddress ?? '—'}</dd></div>
       </dl>
+      {showHistory && <PayerHistoryView payerId={identity.payerId} />}
+    </div>
+  );
+}
+
+/** "PayPal history": this merchant's past transactions with the payer (B, Agent Toolkit list_transactions). Best effort. */
+function PayerHistoryView({ payerId }: { payerId: string }) {
+  const [h, setH] = useState<PayerHistory | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setH(null); setFailed(false);
+    api.payerHistory(payerId).then((r) => live && setH(r)).catch(() => live && setFailed(true));
+    return () => { live = false; };
+  }, [payerId]);
+  return (
+    <div className="id-history">
+      <span className="c-kicker">PayPal history · last 31 days with this store</span>
+      {failed || h?.error ? <p className="c-empty">PayPal history unavailable right now.</p>
+        : !h ? <p className="c-empty">Asking PayPal…</p>
+        : !h.transactions.length ? <p className="c-empty">No earlier transactions with this payer.</p>
+        : (
+          <ul>
+            {h.transactions.slice(0, 5).map((t) => (
+              <li key={t.transactionId}>
+                <span className="mono">{t.date ? shortDate(t.date) : '—'}</span>
+                <span className="mono">{t.amountCents !== undefined ? moneyExact(t.amountCents) : '—'}</span>
+                <span className="mono c-dimtxt">{t.eventCode ?? ''} {t.status ?? ''}</span>
+              </li>
+            ))}
+          </ul>
+        )}
     </div>
   );
 }
@@ -315,25 +348,34 @@ export function SpreadMap({ spread }: { spread: SpreadRes | null }) {
 }
 
 // ------------------------------------------------------------ network
+const REASONS: Record<string, string> = {
+  'decoy:staff_code': 'Used a fake staff code',
+  'decoy:refund_override': 'Used a fake manager code',
+  'decoy:fake_floor': 'Paid a fake floor price',
+  network: 'Matched an earlier blocked payer',
+};
+export const reasonLabel = (r: string) => REASONS[r] ?? r.replace(/^decoy:/, 'decoy: ').replace(/_/g, ' ');
+
 export function NetworkView({ network, highlightPayer }: { network: NetworkRes | null; highlightPayer?: string }) {
   if (!network) return <p className="c-empty">Loading block list…</p>;
-  const cross = network.blocked.filter((b) => b.hits > 1).length;
+  // B starts a row at hits=0 and adds 1 for every later match (any store), so >= 1 means "caught again".
+  const cross = network.blocked.filter((b) => b.hits >= 1).length;
   return (
     <div className="network">
       <div className="net-stores">
         <div className="net-store np"><span>N</span>Northpeak</div>
-        <div className={`net-link${cross ? ' is-hot' : ''}`}><i /><em>{cross ? `${cross} payer${cross > 1 ? 's' : ''} seen at both` : 'shared block list'}</em></div>
+        <div className={`net-link${cross ? ' is-hot' : ''}`}><i /><em>{cross ? `${cross} payer${cross > 1 ? 's' : ''} matched again` : 'shared block list'}</em></div>
         <div className="net-store dw"><span>D</span>Driftwood</div>
       </div>
       <table className="net-table">
-        <thead><tr><th>Payer</th><th>First seen</th><th>Why</th><th>Hits</th></tr></thead>
+        <thead><tr><th>Payer</th><th>First seen</th><th>Why</th><th title="Later matches at any Mirage store">Repeat</th></tr></thead>
         <tbody>
           {network.blocked.map((b) => (
             <tr key={b.payerId} className={b.payerId === highlightPayer ? 'is-hl' : ''}>
               <td className="mono">{b.payerId}</td>
               <td>{STORE_SHORT[b.firstSeenStore]} · {shortDate(b.at)}</td>
-              <td className="net-why">{b.reason}</td>
-              <td><span className={`net-hits${b.hits > 1 ? ' hot' : ''}`}>{b.hits}</span></td>
+              <td className="net-why" title={b.reason}>{reasonLabel(b.reason)}</td>
+              <td><span className={`net-hits${b.hits >= 1 ? ' hot' : ''}`}>{b.hits}</span></td>
             </tr>
           ))}
         </tbody>

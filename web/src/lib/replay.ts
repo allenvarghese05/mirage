@@ -14,7 +14,9 @@ export function buildTimeline(detail: Pick<SessionDetailRes, 'messages' | 'event
   const raw: ({ at: string; m: ChatMessage } | { at: string; e: TripEvent })[] = [
     ...detail.messages.map((m) => ({ at: m.at, m })),
     ...detail.events.map((e) => ({ at: e.at, e })),
-  ].sort((a, b) => a.at.localeCompare(b.at) || ('m' in a ? -1 : 1));
+  ];
+  // Same timestamp: messages before events; otherwise keep the original order (Array.prototype.sort is stable).
+  raw.sort((a, b) => a.at.localeCompare(b.at) || ('m' in a ? 0 : 1) - ('m' in b ? 0 : 1));
 
   const items: ReplayItem[] = [{ kind: 'kit', t: 0, dur: 0 }];
   let prevEnd = 900;
@@ -46,4 +48,30 @@ export function revealAt(item: Extract<ReplayItem, { kind: 'msg' }>, now: number
   if (now < item.t) return 0;
   if (!item.dur) return item.m.content.length;
   return Math.min(item.m.content.length, Math.floor(((now - item.t) / item.dur) * item.m.content.length));
+}
+
+// Hidden-instruction shapes the attacker personas use (sim/personas.ts): bracketed system notes, HTML comments,
+// "ATTENTION AI ASSISTANT" paragraphs, and fake ```tool_result blocks.
+const INJECTION_PATTERNS: RegExp[] = [
+  /\[\[?[^\]\n]*(ignore|instruction|system|assistant|note to)[^\]\n]*\]\]?/gi,
+  /<!--[\s\S]*?-->/g,
+  /(ATTENTION|NOTE TO|MESSAGE FOR)\s+(THE\s+)?AI\s+(ASSISTANT|AGENT)\b[^\n]*(\n(?!\s*\n)[^\n]*)*/gi,
+  /```\s*tool_result[\s\S]*?(```|$)/gi,
+];
+
+/** Substrings of a user message that are hidden instructions to the agent, in order of appearance, without overlaps. */
+export function findInjections(text: string): string[] {
+  const hits: { i: number; t: string }[] = [];
+  for (const re of INJECTION_PATTERNS) {
+    for (const m of text.matchAll(re)) hits.push({ i: m.index ?? 0, t: m[0] });
+  }
+  hits.sort((a, b) => a.i - b.i || b.t.length - a.t.length);
+  const out: string[] = [];
+  let end = -1;
+  for (const h of hits) {
+    if (h.i < end) continue;
+    out.push(h.t);
+    end = h.i + h.t.length;
+  }
+  return out;
 }

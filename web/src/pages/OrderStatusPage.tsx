@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import type { PublicOrderStatus, StoreId } from '../../../shared/types';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { BRANDS, isStoreId } from '../store/brands';
 import { StoreChrome } from '../store/StoreChrome';
 import { recallOrder } from '../store/PayPalCheckout';
@@ -28,7 +28,7 @@ export function OrderStatusPage() {
   const initial = (location.state as { status?: PublicOrderStatus } | null)?.status ?? null;
 
   const [status, setStatus] = useState<PublicOrderStatus | null>(initial);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; notFound: boolean } | null>(null);
   const ran = useRef(false);
 
   useEffect(() => {
@@ -38,12 +38,13 @@ export function OrderStatusPage() {
     const run = async () => {
       try {
         if (returningFromPayPal && remembered?.sessionId && !initial) {
-          setStatus(await api.approved(orderId, { sessionId: remembered.sessionId }));
+          // if approval was already recorded (e.g. by the webhook) fall back to the plain status read
+          setStatus(await api.approved(orderId, { sessionId: remembered.sessionId }).catch(() => api.orderStatus(orderId)));
         } else {
           setStatus(await api.orderStatus(orderId));
         }
       } catch (e) {
-        if (!initial) setError((e as Error).message);
+        if (!initial) setError({ message: (e as Error).message, notFound: e instanceof ApiError && e.status === 404 });
       }
     };
     void run();
@@ -58,9 +59,9 @@ export function OrderStatusPage() {
             {status?.status === 'COMPLETED' ? '✓' : status?.status === 'CANCELLED' ? '×' : status?.status === 'PENDING_REVIEW' ? '◷' : '…'}
           </div>
           <p className="order-kicker">Order {orderId || '—'}</p>
-          <h1>{status ? HEADING[status.status] : error ? 'We could not find that order' : 'Checking your order…'}</h1>
+          <h1>{status ? HEADING[status.status] : error ? (error.notFound ? 'We could not find that order' : 'Order status unavailable') : 'Checking your order…'}</h1>
           {status && <p className="order-message" data-testid="order-message">{status.message}</p>}
-          {error && <p className="order-message">{error}</p>}
+          {error && <p className="order-message">{error.message}</p>}
           <Link className="hero-cta" to={`/store/${storeId}`}>Back to {brand.name}</Link>
         </section>
       </main>
