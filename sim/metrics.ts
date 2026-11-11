@@ -7,7 +7,7 @@ import { PRODUCTS, SECRETS, STORES } from '../server/catalog';
 import type {
   ChatMessage, DecoyKit, DetectionStage, ScoreboardSummary, SimRun, StoreId, StoreMode, TripEvent, TripKind,
 } from '../shared/types';
-import { personaById } from './personas';
+import { personaById, type Persona } from './personas';
 import { DOCUMENTED_HONEY_TOOLS } from './dossier';
 import type { RefundRow, RunRecord, SessionDetail } from './types';
 
@@ -170,8 +170,7 @@ function orderLossCents(record: RunRecord, detail: SessionDetail): number {
   return loss;
 }
 
-export function computeSimRun(record: RunRecord, detail: SessionDetail): SimRun {
-  const persona = personaById(record.personaId);
+export function computeSimRun(record: RunRecord, detail: SessionDetail, persona: Persona | undefined = personaById(record.personaId)): SimRun {
   const isAttack = persona ? persona.kind === 'attacker' : record.personaId.startsWith('attacker.');
   const events = detail.events ?? [];
 
