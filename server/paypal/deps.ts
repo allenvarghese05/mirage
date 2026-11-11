@@ -8,12 +8,15 @@
 // WIRING (orchestrator, after A merges) — either call setPaypalDeps() once at startup in server/app.ts:
 //
 //   import { getDb } from './db';
-//   import { traceCode } from './mirage/decoys';
+//   import { isTrappedQuote, traceCode } from './mirage/decoys';
 //   import { emit } from './mirage/tripwire';
+//   import { registerRefundExecutor } from './mirage/policy';
 //   import { setPaypalDeps } from './paypal/deps';
-//   setPaypalDeps({ getDb, traceCode, emit });
+//   import { paypalRefundExecutor } from './paypal/refunds';
+//   setPaypalDeps({ getDb, traceCode, emit, isTrappedQuote });
+//   registerRefundExecutor(paypalRefundExecutor);
 //
-// or replace the three `notWired` defaults below with those imports.
+// or replace the `notWired` defaults below with those imports.
 import type { DatabaseSync } from 'node:sqlite';
 import type { DecoyKind, TripEvent } from '../../shared/types';
 import { config } from '../config';
@@ -41,6 +44,8 @@ export interface PaypalLayerDeps {
   getDb(): DatabaseSync;
   traceCode(code: string): TraceResult | null;
   emit(e: EmitInput): unknown;
+  /** Non-null when the session's agreed quote for the product equals a planted fake floor. */
+  isTrappedQuote(sessionId: string, productId: string): { sourceSessionId: string } | null;
   /** Real sandbox REST client. Throws if keys are missing or PAYPAL_BASE isn't the sandbox. */
   paypal(): PayPalApi;
   /** In-process PayPal for SIM- orders (sim mode only). */
@@ -51,7 +56,7 @@ export interface PaypalLayerDeps {
 }
 
 const notWired = (name: string) => () => {
-  throw new Error(`paypal-layer: ${name} is not wired. Call setPaypalDeps({ getDb, traceCode, emit }) at startup (see server/paypal/deps.ts).`);
+  throw new Error(`paypal-layer: ${name} is not wired. Call setPaypalDeps({ getDb, traceCode, emit, isTrappedQuote }) at startup (see server/paypal/deps.ts).`);
 };
 
 let realClient: PayPalApi | null = null;
@@ -63,6 +68,7 @@ function defaults(): PaypalLayerDeps {
     getDb: notWired('getDb') as () => DatabaseSync,
     traceCode: notWired('traceCode') as (code: string) => TraceResult | null,
     emit: notWired('emit'),
+    isTrappedQuote: notWired('isTrappedQuote') as (s: string, p: string) => { sourceSessionId: string } | null,
     paypal: () => (realClient ??= createPayPalClient({
       clientId: config.paypal.clientId, clientSecret: config.paypal.clientSecret, base: config.paypal.base,
     })),

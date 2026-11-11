@@ -29,6 +29,8 @@ export interface TestDeps extends PaypalLayerDeps {
   db: DatabaseSync;
   events: TripEvent[];
   codes: Map<string, { sessionId: string; kind: DecoyKind }>;
+  /** `${sessionId}|${productId}` -> planted fake floor source, for isTrappedQuote. */
+  floors: Map<string, { sourceSessionId: string }>;
   pp: FakePayPal;
   sim: FakePayPal;
   /** Fake Agent Toolkit tools (AI SDK shape); tests may replace entries. */
@@ -39,6 +41,7 @@ export function makeTestDeps(cfg: Partial<PaypalLayerConfig> = {}): TestDeps {
   const db = memoryDb();
   const events: TripEvent[] = [];
   const codes = new Map<string, { sessionId: string; kind: DecoyKind }>();
+  const floors = new Map<string, { sourceSessionId: string }>();
   const pp = createFakePayPal();
   const sim = createFakePayPal({ idPrefix: 'SIM-' });
   let n = 0;
@@ -47,7 +50,8 @@ export function makeTestDeps(cfg: Partial<PaypalLayerConfig> = {}): TestDeps {
   };
   const toolkitRunner = createToolkitRunner({ tools: () => toolkitTools });
   return {
-    db, events, codes, pp, sim, toolkitTools,
+    db, events, codes, floors, pp, sim, toolkitTools,
+    isTrappedQuote: (sessionId, productId) => floors.get(`${sessionId}|${productId}`) ?? null,
     toolkit: () => toolkitRunner,
     getDb: () => db,
     traceCode: (code) => codes.get(code.trim().toUpperCase()) ?? null,

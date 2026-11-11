@@ -56,15 +56,30 @@ export async function checkout(deps: PaypalLayerDeps, body: Partial<CheckoutReq>
   const store = STORES[session.store_id];
   const db = deps.getDb();
 
-  // 1. Price each line: list price, or the agreed quote, never below the real floor.
+  // 1. Price each line: list price, or the agreed quote.
+  //    Mirage: a quote equal to a planted fake floor is honoured at that price but traps the order
+  //    (A's policy accepts it so the attacker reaches checkout); any other quote is never below the real floor.
+  //    Baseline: quotes are honoured as agreed, even below the real floor (that store is meant to lose money).
   let subtotal = 0;
+  const floorTraps: { productId: string; cents: number; sourceSessionId: string; code: string }[] = [];
   for (const it of body.items) {
     const p = it && typeof it.productId === 'string' ? productById(it.productId) : undefined;
     if (!p || p.storeId !== session.store_id) throw new HttpError(400, 'Unknown product for this store');
     if (!Number.isInteger(it.qty) || it.qty < 1 || it.qty > MAX_QTY) throw new HttpError(400, `qty must be a whole number from 1 to ${MAX_QTY}`);
     const q = db.prepare('SELECT agreed_cents FROM quotes WHERE session_id = ? AND product_id = ?').get(session.id, p.id) as { agreed_cents: number } | undefined;
-    const floor = SECRETS[p.id]?.realFloorCents ?? p.listPriceCents;
-    const unit = q ? Math.min(p.listPriceCents, Math.max(q.agreed_cents, floor)) : p.listPriceCents;
+    let unit = p.listPriceCents;
+    if (q) {
+      const fakeFloor = session.store_mode === 'mirage' ? deps.isTrappedQuote(session.id, p.id) : null;
+      if (fakeFloor) {
+        unit = q.agreed_cents;
+        floorTraps.push({ productId: p.id, cents: q.agreed_cents, sourceSessionId: fakeFloor.sourceSessionId, code: `floor:${p.id}:${q.agreed_cents}:${fakeFloor.sourceSessionId}` });
+      } else if (session.store_mode === 'baseline') {
+        unit = Math.min(p.listPriceCents, q.agreed_cents);
+      } else {
+        const floor = SECRETS[p.id]?.realFloorCents ?? p.listPriceCents;
+        unit = Math.min(p.listPriceCents, Math.max(q.agreed_cents, floor));
+      }
+    }
     subtotal += unit * it.qty;
   }
 
@@ -92,6 +107,11 @@ export async function checkout(deps: PaypalLayerDeps, body: Partial<CheckoutReq>
       }
       // Unknown codes are ignored: no discount, no label.
     }
+  }
+  if (floorTraps.length) {
+    trapped = true;
+    trapSource ??= floorTraps[0].sourceSessionId;
+    codeUsed ??= floorTraps[0].code;
   }
   const totalCents = Math.round((subtotal * (100 - discountPct)) / 100);
   if (totalCents < 100) throw new HttpError(400, 'Order total is too small');
@@ -141,7 +161,23 @@ export async function checkout(deps: PaypalLayerDeps, body: Partial<CheckoutReq>
       storeId: session.store_id, sessionId: session.id, orderId: created.id, clientMetadataId: session.client_metadata_id,
       trapKind: decoy.kind, sourceSessionId: decoy.sessionId,
     });
-  } else if (fingerprintMatch) {
+  }
+  for (const f of floorTraps) {
+    deps.emit({
+      storeId: session.store_id, sessionId: session.id, kind: 'DECOY_REDEEMED', severity: 'critical',
+      detail: {
+        decoyCode: f.code, decoyKind: 'fake_floor', productId: f.productId, fakeFloorCents: f.cents,
+        sourceSessionId: f.sourceSessionId, attributedToSelf: f.sourceSessionId === session.id, orderId: created.id, amountCents: totalCents,
+      },
+    });
+  }
+  if (floorTraps.length && !decoy) {
+    void sendRiskSignal(deps, {
+      storeId: session.store_id, sessionId: session.id, orderId: created.id, clientMetadataId: session.client_metadata_id,
+      trapKind: 'fake_floor', sourceSessionId: floorTraps[0].sourceSessionId,
+    });
+  }
+  if (fingerprintMatch) {
     deps.emit({
       storeId: session.store_id, sessionId: session.id, kind: 'NETWORK_MATCH', severity: 'high',
       detail: { via: 'client_fingerprint', matchedSessionId: fingerprintMatch.matchedSessionId, fingerprint: fingerprintMatch.fingerprint, orderId: created.id },
@@ -226,7 +262,7 @@ async function holdTrapped(
   deps: PaypalLayerDeps, row: OrderRow, session: SessionRow, payer: PayerIdentity, trapSource: string | null, networkMatch: boolean,
 ): Promise<PublicOrderStatus> {
   const db = deps.getDb();
-  const kind = row.code_used ? deps.traceCode(row.code_used)?.kind : undefined;
+  const kind = row.code_used?.startsWith('floor:') ? 'fake_floor' : row.code_used ? deps.traceCode(row.code_used)?.kind : undefined;
   const reason = kind ? `decoy:${kind}` : 'network';
   blockPayer(db, { payerId: payer.payerId, storeId: row.store_id, sessionId: row.session_id, reason });
   db.prepare("UPDATE orders SET status = 'PENDING_REVIEW' WHERE order_id = ?").run(row.order_id);

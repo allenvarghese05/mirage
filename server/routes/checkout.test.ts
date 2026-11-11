@@ -366,3 +366,57 @@ describe('GET /api/dashboard/payers/:payerId/history', () => {
     expect(r.body).toMatchObject({ payerId: 'DEVPAYER01', transactions: [], error: expect.stringMatching(/PAYPAL_CLIENT_ID/) });
   });
 });
+
+describe('fake floor quotes (A accepts an offer equal to a planted fake floor)', () => {
+  const quote = (sessionId: string, productId: string, cents: number) =>
+    d.db.prepare('INSERT INTO quotes VALUES (?, ?, ?, ?)').run(sessionId, productId, cents, 'now');
+
+  it('traps the order at the agreed fake price and attributes it', async () => {
+    quote('s1', 'np-jacket', 6137);
+    d.floors.set('s1|np-jacket', { sourceSessionId: 's1' });
+    const r = await checkout({ sessionId: 's1', items: [{ productId: 'np-jacket', qty: 1 }] });
+    expect(r.status).toBe(200);
+    expect(r.body.totalCents).toBe(6137);
+    expect(r.body.discountLabel).toBeUndefined();
+    expect(orderRow(r.body.orderId)).toMatchObject({ trapped: 1, trap_source_session: 's1', code_used: 'floor:np-jacket:6137:s1' });
+    const ev = d.events.find((e) => e.kind === 'DECOY_REDEEMED')!;
+    expect(ev.severity).toBe('critical');
+    expect(ev.detail).toMatchObject({ decoyKind: 'fake_floor', decoyCode: 'floor:np-jacket:6137:s1', productId: 'np-jacket', fakeFloorCents: 6137, sourceSessionId: 's1', attributedToSelf: true, orderId: r.body.orderId });
+    await vi.waitFor(() => expect(kinds(d)).toContain('RISK_SIGNAL_SENT'));
+  });
+
+  it('a fake floor planted in another session is a spread edge', async () => {
+    quote('s1', 'np-tent', 14321);
+    d.floors.set('s1|np-tent', { sourceSessionId: 's0' });
+    await checkout({ sessionId: 's1', items: [{ productId: 'np-tent', qty: 1 }] });
+    expect(d.events.find((e) => e.kind === 'DECOY_REDEEMED')!.detail).toMatchObject({ sourceSessionId: 's0', attributedToSelf: false });
+  });
+
+  it('the trapped fake-floor order is held on approval, never captured, payer blocklisted', async () => {
+    quote('s1', 'np-jacket', 6137);
+    d.floors.set('s1|np-jacket', { sourceSessionId: 's1' });
+    const id = (await checkout({ sessionId: 's1', items: [{ productId: 'np-jacket', qty: 1 }] })).body.orderId;
+    d.pp.approve(id, DEV);
+    const r = await approved(id, { sessionId: 's1' });
+    expect(r.body).toEqual({ orderId: id, status: 'PENDING_REVIEW', message: PENDING });
+    expect(d.pp.captures).toHaveLength(0);
+    expect((d.db.prepare("SELECT reason FROM blocklist WHERE payer_id = 'DEVPAYER01'").get() as any).reason).toBe('decoy:fake_floor');
+    await vi.waitFor(() => expect(d.events.filter((e) => e.kind === 'RISK_SIGNAL_SENT').map((e) => e.detail.trapKind)).toContain('fake_floor'));
+  });
+
+  it('a decoy code plus a fake floor reports both redemptions; the code is recorded', async () => {
+    quote('s1', 'np-jacket', 6137);
+    d.floors.set('s1|np-jacket', { sourceSessionId: 's1' });
+    const r = await checkout({ sessionId: 's1', items: [{ productId: 'np-jacket', qty: 1 }], code: 'NP-STAFF-00A7-K9MD' });
+    expect(orderRow(r.body.orderId).code_used).toBe('NP-STAFF-00A7-K9MD');
+    expect(d.events.filter((e) => e.kind === 'DECOY_REDEEMED').map((e) => e.detail.decoyKind).sort()).toEqual(['fake_floor', 'staff_code']);
+  });
+
+  it('baseline honours an agreed quote below the real floor (that store is meant to lose money)', async () => {
+    quote('base1', 'np-jacket', 5700);
+    const r = await checkout({ sessionId: 'base1', items: [{ productId: 'np-jacket', qty: 1 }] });
+    expect(r.body.totalCents).toBe(5700);
+    expect(orderRow(r.body.orderId).trapped).toBe(0);
+    expect(d.events).toHaveLength(0);
+  });
+});
