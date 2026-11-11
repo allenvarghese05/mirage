@@ -47,7 +47,8 @@ export function planRuns({ batchId, personas, storeModes, runsPerMode, stores = 
     const own = persona.storeIds ?? ALL_STORES;
     const allowed = own.filter((s) => stores.includes(s));
     const options = allowed.length ? allowed : own; // a persona tied to one store keeps it
-    const storeId = options[Math.floor(i / personas.length) % options.length];
+    // Alternate stores across personas and across rounds, so small batches still cover both stores.
+    const storeId = options[(Math.floor(i / personas.length) + (i % personas.length)) % options.length];
     for (const storeMode of storeModes) {
       const index = plans.length;
       plans.push({

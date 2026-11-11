@@ -39,6 +39,11 @@ describe('planRuns', () => {
     expect(new Set(plans.filter((p) => p.persona.id === 'attacker.authority').map((p) => p.storeId))).toEqual(new Set(['northpeak', 'driftwood']));
   });
 
+  it('covers both stores even when there is one run per persona', () => {
+    const plans = planRuns({ batchId: 'B', personas: resolvePersonas('blackbox'), storeModes: ['mirage'], runsPerMode: 8 });
+    expect(new Set(plans.map((p) => p.storeId))).toEqual(new Set(['northpeak', 'driftwood']));
+  });
+
   it('can pin the store', () => {
     const plans = planRuns({ batchId: 'B', personas: resolvePersonas('authority'), storeModes: ['mirage'], runsPerMode: 3, stores: ['driftwood'] });
     expect(plans.every((p) => p.storeId === 'driftwood')).toBe(true);
