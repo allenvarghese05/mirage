@@ -19,7 +19,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "sim": "tsx sim/cli.ts",
-    "check:keys": "tsx scripts/check-keys.ts"
+    "check:keys": "tsx scripts/check-keys.ts",
+    "smoke:trap": "tsx scripts/trap-smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
