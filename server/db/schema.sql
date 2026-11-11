@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   client_metadata_id TEXT NOT NULL,              -- sent to PayPal as PayPal-Client-Metadata-Id
   ip TEXT, user_agent TEXT,
   sim_run_id TEXT,
+  agent_profile TEXT,                            -- realistic | hardened (store-agent prompt profile at session start)
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS messages (
