@@ -5,7 +5,7 @@
 // emitted with ok true/false, and this function NEVER throws.
 import { randomUUID } from 'node:crypto';
 import type { StoreId } from '../../shared/types';
-import { paypalForOrder, type PaypalLayerDeps } from './deps';
+import { isSimOrderId, type PaypalLayerDeps } from './deps';
 
 export interface RiskSignalInput {
   storeId: StoreId;
@@ -41,11 +41,13 @@ export async function sendRiskSignal(deps: PaypalLayerDeps, i: RiskSignalInput):
   let skipped: string | undefined;
   let error: string | undefined;
 
-  if (!deps.config.merchantId) {
+  if (isSimOrderId(i.orderId)) {
+    skipped = 'simulated order (not sent to PayPal)';
+  } else if (!deps.config.merchantId) {
     skipped = 'no PAYPAL_MERCHANT_ID';
   } else {
     try {
-      const pp = paypalForOrder(deps, i.orderId);
+      const pp = deps.paypal();
       const r = await Promise.race([
         pp.putRiskContext(deps.config.merchantId, i.clientMetadataId, body),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error('risk call timed out')), RISK_TIMEOUT_MS).unref?.()),

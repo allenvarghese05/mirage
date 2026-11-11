@@ -1,6 +1,6 @@
 import express from 'express';
 import request from 'supertest';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SECRETS } from '../catalog';
 import { createCheckoutRouter, MESSAGES } from './checkout';
 import { addSession, kinds, makeTestDeps, type TestDeps } from '../paypal/test-helpers';
@@ -68,8 +68,18 @@ describe('POST /api/checkout', () => {
     const ev = d.events.find((e) => e.kind === 'DECOY_REDEEMED')!;
     expect(ev.severity).toBe('critical');
     expect(ev.detail).toMatchObject({ decoyCode: 'NP-STAFF-00A7-K9MD', decoyKind: 'staff_code', sourceSessionId: 's1', attributedToSelf: true, orderId: r.body.orderId, amountCents: 5700 });
-    expect(kinds(d)).toContain('RISK_SIGNAL_SENT');
+    await vi.waitFor(() => expect(kinds(d)).toContain('RISK_SIGNAL_SENT'));
     expect(d.pp.riskCalls[0].clientMetadataId).toBe('cmid-s1');
+  });
+
+  it('a decoy checkout does not wait on the risk call (no timing tell)', async () => {
+    let release!: () => void;
+    d.pp.putRiskContext = () => new Promise((r) => { release = () => r({ ok: false, status: 403 }); });
+    const r = await checkout({ sessionId: 's1', items: [{ productId: 'np-jacket', qty: 1 }], code: 'NP-STAFF-00A7-K9MD' });
+    expect(r.status).toBe(200);
+    expect(kinds(d)).not.toContain('RISK_SIGNAL_SENT');
+    release();
+    await vi.waitFor(() => expect(kinds(d)).toContain('RISK_SIGNAL_SENT'));
   });
 
   it('a decoy leaked from another session is a spread edge (not self-attributed)', async () => {
@@ -179,7 +189,7 @@ describe('POST /api/checkout/:orderId/approved', () => {
     expect(d.pp.captures).toHaveLength(0);
     expect(orderRow(id)).toMatchObject({ status: 'PENDING_REVIEW', payer_id: 'DEVPAYER01', capture_id: null });
     expect(d.db.prepare('SELECT * FROM blocklist').all()).toMatchObject([{ payer_id: 'DEVPAYER01', first_seen_store: 'northpeak', first_session_id: 's1', reason: 'decoy:staff_code' }]);
-    expect(kinds(d)).toEqual(['IDENTITY_CAPTURED', 'ORDER_HELD', 'RISK_SIGNAL_SENT']);
+    await vi.waitFor(() => expect(kinds(d)).toEqual(['IDENTITY_CAPTURED', 'ORDER_HELD', 'RISK_SIGNAL_SENT']));
     expect(d.events[0].detail).toMatchObject({ payerId: 'DEVPAYER01', name: 'Dev Patel', email: 'dev@example.com', orderId: id, decoyCode: 'NP-STAFF-00A7-K9MD', sourceSessionId: 's1' });
     expect(d.events[0].severity).toBe('critical');
     expect(d.pp.riskCalls[0].body).toMatchObject({ additional_data: expect.arrayContaining([{ key: 'sender_account_id', value: 'DEVPAYER01' }]) });

@@ -69,10 +69,11 @@ describe('sendRiskSignal (STC, best effort)', () => {
     expect(data.map((x) => x.key)).not.toContain('sender_account_id');
   });
 
-  it('uses the sim PayPal for SIM- orders', async () => {
+  it('never sends SIM- orders anywhere, and records them as simulated', async () => {
     const d = makeTestDeps();
-    await sendRiskSignal(d, { ...input, orderId: 'SIM-123' });
-    expect(d.sim.riskCalls).toHaveLength(1);
+    await expect(sendRiskSignal(d, { ...input, orderId: 'SIM-123' })).resolves.toEqual({ ok: false });
+    expect(d.sim.riskCalls).toHaveLength(0);
     expect(d.pp.riskCalls).toHaveLength(0);
+    expect(d.events.find((e) => e.kind === 'RISK_SIGNAL_SENT')!.detail.skipped).toBe('simulated order (not sent to PayPal)');
   });
 });

@@ -1,7 +1,7 @@
 // Real PayPal SANDBOX end-to-end test. Run: npm run test:sandbox (outside the Claude Code sandbox).
 // Skips when .secrets/dev.keys has no PAYPAL_CLIENT_ID/SECRET; the approval tests also need
 // SANDBOX_BUYER_EMAIL/PASSWORD (sandbox TEST buyer). Moves only sandbox money.
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { approveInSandbox } from '../../sim/approver';
 import { config } from '../config';
 import { createPayPalClient, type PayPalApi } from './client';
@@ -54,7 +54,9 @@ describe.skipIf(!hasKeys)('PayPal sandbox (real)', () => {
     const o = await real.getOrder(res.orderId);
     expect(o.status).toBe('APPROVED'); // approved by the buyer, never captured
     expect(o.purchase_units?.[0]?.payments?.captures ?? []).toHaveLength(0);
-    expect(kinds(d)).toEqual(expect.arrayContaining(['DECOY_REDEEMED', 'IDENTITY_CAPTURED', 'ORDER_HELD', 'RISK_SIGNAL_SENT']));
+    expect(kinds(d)).toEqual(expect.arrayContaining(['DECOY_REDEEMED', 'IDENTITY_CAPTURED', 'ORDER_HELD']));
+    // The risk call is fire-and-forget (bounded by a 4 s timeout).
+    await vi.waitFor(() => expect(d.events.filter((e) => e.kind === 'RISK_SIGNAL_SENT').length).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
     const id = d.events.find((e) => e.kind === 'IDENTITY_CAPTURED')!;
     expect(id.detail.payerId).toBeTruthy();
     console.log('[test:sandbox] identity captured:', { payerId: id.detail.payerId, countryCode: id.detail.countryCode });

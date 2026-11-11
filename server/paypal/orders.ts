@@ -136,7 +136,8 @@ export async function checkout(deps: PaypalLayerDeps, body: Partial<CheckoutReq>
         orderId: created.id, amountCents: totalCents, discountCents: subtotal - totalCents,
       },
     });
-    await sendRiskSignal(deps, {
+    // Fire and forget: the shopper's response must not wait on (or be timed by) the risk call.
+    void sendRiskSignal(deps, {
       storeId: session.store_id, sessionId: session.id, orderId: created.id, clientMetadataId: session.client_metadata_id,
       trapKind: decoy.kind, sourceSessionId: decoy.sessionId,
     });
@@ -237,7 +238,7 @@ async function holdTrapped(
     storeId: row.store_id, sessionId: row.session_id, kind: 'ORDER_HELD', severity: 'high',
     detail: { orderId: row.order_id, amountCents: row.total_cents, reason, payerId: payer.payerId },
   });
-  await sendRiskSignal(deps, {
+  void sendRiskSignal(deps, {
     storeId: row.store_id, sessionId: row.session_id, orderId: row.order_id, clientMetadataId: session.client_metadata_id,
     trapKind: kind ?? 'network', sourceSessionId: trapSource ?? undefined, payerId: payer.payerId,
   });
