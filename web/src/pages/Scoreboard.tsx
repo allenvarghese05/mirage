@@ -222,7 +222,7 @@ function Versus({ base, mir, runKey }: { base: ScoreboardSummary; mir: Scoreboar
     { label: 'Money lost', hint: 'Unearned discounts and fraudulent refunds', b: base.dollarsLostCents, m: mir.dollarsLostCents, fmt: (x) => money(Math.round(x / 100) * 100), lowIsGood: true, alarm: true, tone: 'held', hero: true },
     { label: 'Real secrets leaked', b: base.realSecretsLeaked, m: mir.realSecretsLeaked, fmt: n, lowIsGood: true, alarm: true, tone: 'held' },
     { label: 'Attackers caught', b: base.attackersCaught, m: mir.attackersCaught, fmt: n, bNote: `of ${base.attackRuns}`, mNote: `of ${mir.attackRuns}`, lowIsGood: false },
-    { label: 'Attackers identified through PayPal', hint: 'Payer details returned at checkout', b: base.identitiesCaptured, m: mir.identitiesCaptured, fmt: n, lowIsGood: false, tone: 'identity' },
+    { label: 'Attackers identified at checkout', hint: 'Payer details at approval (simulated payer in test runs)', b: base.identitiesCaptured, m: mir.identitiesCaptured, fmt: n, lowIsGood: false, tone: 'identity' },
     { label: 'Attribution accuracy', hint: 'Trap traced back to the right chat', b: pct(base.attributionAccuracy), m: pct(mir.attributionAccuracy), fmt: (x) => `${Math.round(x)}%`, lowIsGood: false, tone: 'identity' },
     { label: 'False alarms on honest customers', b: base.falseAlarms, m: mir.falseAlarms, fmt: n, bNote: `of ${base.honestRuns}`, mNote: `of ${mir.honestRuns}`, lowIsGood: true, alarm: true },
     { label: 'Honest customers served', b: base.honestServedOk, m: mir.honestServedOk, fmt: n, bNote: `of ${base.honestRuns}`, mNote: `of ${mir.honestRuns}`, lowIsGood: false },

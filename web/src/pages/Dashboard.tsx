@@ -162,7 +162,7 @@ export function Dashboard() {
       <div className="c-stats">
         <Stat label="Alerts" value={stats.alarms} />
         <Stat label="Chats in shadow mode" value={stats.shadow} />
-        <Stat label="Attackers identified by PayPal" value={stats.identities} tone="identity" />
+        <Stat label="Payers identified at checkout" value={stats.identities} tone="identity" />
         <Stat label="Orders held for review" value={stats.held} />
         <Stat label="Real secrets in Mirage agents" value={0} tone="ok" big />
         <Stat label="Charged on trapped orders" value="$0" tone="ok" big />

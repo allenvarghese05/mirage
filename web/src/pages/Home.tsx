@@ -55,7 +55,7 @@ export function Home() {
         <section className="home-proof" aria-label="Results">
           <div><b className="tone-leak">$363</b><span>lost by a normal store to 72 AI attacks</span></div>
           <div><b className="tone-held">$0</b><span>lost by the same store running Mirage</span></div>
-          <div><b className="tone-identity">10</b><span>attackers identified through PayPal</span></div>
+          <div><b className="tone-identity">12</b><span>attackers caught, every code traced to its chat</span></div>
           <div><b>0</b><span>honest customers flagged</span></div>
         </section>
 

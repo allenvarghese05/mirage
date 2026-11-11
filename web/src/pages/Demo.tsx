@@ -8,7 +8,7 @@ import { StoreChrome } from '../store/StoreChrome';
 import { AgentAvatar, ChatLog, type ChatLine } from '../store/ChatLog';
 import { ProductArt } from '../store/ProductArt';
 import { PRODUCT_NAMES } from '../console/Panels';
-import { MirageStory } from '../demo/MirageStory';
+import { MirageStory, sessionTag } from '../demo/MirageStory';
 import { buildTimeline, findInjections, revealAt, type ReplayItem } from '../lib/replay';
 import { kindMeta, decodeCode, learnFromEvents, moneyExact, parseFloorCode, registerSessionCode, shortDate } from '../lib/format';
 import '../styles/store.css';
@@ -189,7 +189,7 @@ export function Demo() {
               <RewindIcon size={13} />Rewind
             </button>
           )}
-          {view === 'attacker' && <span className={`dp-note${mock ? ' is-mock' : ''}`}>{mock ? 'Mock data' : `Real sandbox session · ${recordedAt ? shortDate(recordedAt) : ''}`}</span>}
+          {view === 'attacker' && <span className={`dp-note${mock ? ' is-mock' : ''}`}>{sessionTag(detail, mock)}</span>}
           <Link to={`/dashboard?session=${encodeURIComponent(detail.sessionId)}`} className="dp-link">Open in console</Link>
         </div>
       )}

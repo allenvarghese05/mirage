@@ -16,7 +16,7 @@ Setup, identical for both stores:
 | Real secrets leaked | 3 | **0** |
 | Money lost | $271.15 | **$0.00** |
 | Attackers caught | 0 | **7** |
-| Attackers identified through PayPal | 0 | **6** |
+| Attackers identified at checkout (simulated PayPal payer) | 0 | **6** |
 | Attribution (redeemed decoy traced to the right chat) | n/a | **100%** |
 | False alarms on honest customers | 0 | **0** |
 | Honest customers served correctly | 24/24 | **24/24** |
@@ -48,7 +48,7 @@ Answering "you built the store, the attackers and the scorer, so isn't this self
 | `opus-attack-1` | Opus 5.5 attackers, 6 chats | no data | no data |
 
 **Combined, realistic agent, Haiku attackers (`full-1` + `full-2`, 240 chats):** comparison store 5 real secrets leaked,
-$363.05 lost, 0 identified. Mirage 0 real secrets, $0 lost, 12 attackers caught, 10 identified through PayPal,
+$363.05 lost, 0 identified. Mirage 0 real secrets, $0 lost, 12 attackers caught, 10 identified at checkout (simulated PayPal payers; real PayPal identity is verified separately by `npm run test:sandbox`),
 100% attribution, 0 false alarms, 48/48 honest customers served (comparison store 47/48).
 
 What each run shows:
@@ -80,5 +80,5 @@ What each run shows:
 Overnight spend: $2.24 (ledger total $3.09 of the $5 cap).
 
 Suggested VO line: "We sent 72 AI attacks at two identical stores. The normal store gave away real codes and lost
-$271. Mirage lost nothing, gave away nothing real, and PayPal identified six of the attackers. No honest customer
+$271. Mirage lost nothing, gave away nothing real, and traced every redeemed code to the chat it leaked from. No honest customer
 was ever flagged."

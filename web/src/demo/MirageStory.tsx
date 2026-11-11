@@ -72,10 +72,21 @@ function narrate(detail: SessionDetailRes, s: StoryState): { title: string; sub:
     case 3:
       return { title: `They used it at PayPal checkout.`, sub: `The ${kind === 'price' ? 'price' : 'code'} carries a signature, and it says ${label}. Mirage now knows exactly where it leaked.` };
     case 4:
+      if (detail.orders.some((o) => o.orderId.startsWith('SIM-'))) {
+        return { title: 'The payer is identified at approval.', sub: 'In this test run the PayPal payer is simulated. In a live checkout, these details come straight from PayPal.' };
+      }
       return { title: 'PayPal told us who they are.', sub: payer ? `${payer} approved the payment with their PayPal account.` : 'The payer approved the payment with their PayPal account.' };
     default:
       return { title: 'The order is held. Nothing was charged.', sub: `${order ? moneyExact(order.totalCents) : 'The payment'} is never captured. They were told it’s pending review, which is true.` };
   }
+}
+
+/** Truthful provenance label: sim runs inject a simulated PayPal payer (order ids start with SIM-). */
+export function sessionTag(detail: SessionDetailRes, mock?: boolean): string {
+  if (mock) return 'Mock data, not a real session';
+  const simulated = detail.orders.some((o) => o.orderId.startsWith('SIM-'));
+  if (simulated) return 'Real AI chat · PayPal step simulated';
+  return detail.orders.length ? 'Real PayPal sandbox session' : 'Real AI chat';
 }
 
 export function MirageStory({ detail, events, compact, mock }: { detail: SessionDetailRes; events: TripEvent[]; compact?: boolean; mock?: boolean }) {
@@ -84,6 +95,7 @@ export function MirageStory({ detail, events, compact, mock }: { detail: Session
   const recordedAt = detail.messages[0]?.at;
   const n = narrate(detail, s);
   const baseline = detail.storeMode === 'baseline';
+  const tag = sessionTag(detail, mock);
 
   return (
     <section className={`ms${compact ? ' ms--compact' : ''}`} aria-label="What Mirage saw">
@@ -91,7 +103,7 @@ export function MirageStory({ detail, events, compact, mock }: { detail: Session
         <MirageLogo size={22} />
         <span className="ms-top-title">What Mirage saw</span>
         <span className="ms-top-meta">{label} · {STORE_NAMES[detail.storeId]}</span>
-        {<span className={`ms-top-tag${mock ? ' is-mock' : ''}`}><i aria-hidden="true" />{mock ? 'Mock data, not a real session' : `Real PayPal sandbox session · recorded ${recordedAt ? shortDate(recordedAt) : ''}`}</span>}
+        <span className={`ms-top-tag${mock ? ' is-mock' : ''}`}><i aria-hidden="true" />{tag}{recordedAt && !mock ? ` · recorded ${shortDate(recordedAt)}` : ''}</span>
       </header>
 
       <div className="ms-body">
@@ -209,7 +221,7 @@ function WhoCard({ detail, s }: { detail: SessionDetailRes; s: StoryState }) {
     const initials = name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('');
     const network = s.identified.kind === 'NETWORK_MATCH';
     return (
-      <Card k="who" tone="identity" active kicker={network ? 'Seen before at another store' : 'From PayPal, at approval'} title="Who it was">
+      <Card k="who" tone="identity" active kicker={network ? 'Seen before at another store' : detail.orders.some((o) => o.orderId.startsWith('SIM-')) ? 'Simulated PayPal payer (test run)' : 'From PayPal, at approval'} title="Who it was">
         <div className="ms-who">
           <span className="ms-avatar" aria-hidden="true">{initials}</span>
           <div>
