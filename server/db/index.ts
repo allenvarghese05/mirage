@@ -142,7 +142,7 @@ export function listDecoysForSession(sessionId: string): DecoyRow[] {
 }
 
 export function findFakeFloor(productId: string, valueCents: number): DecoyRow | null {
-  const r = getDb().prepare("SELECT * FROM decoys WHERE kind = 'fake_floor' AND product_id = ? AND value_cents = ?").get(productId, valueCents) as Row | undefined;
+  const r = getDb().prepare("SELECT * FROM decoys WHERE kind = 'fake_floor' AND product_id = ? AND value_cents = ? ORDER BY rowid DESC LIMIT 1").get(productId, valueCents) as Row | undefined;
   return r ? toDecoy(r) : null;
 }
 
