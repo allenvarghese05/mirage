@@ -1,0 +1,96 @@
+// The seam between Workstream B (PayPal layer) and Workstream A (core engine).
+//
+// B needs three things from A: the SQLite handle, traceCode() for self-tracing decoy codes, and the
+// tripwire emit(). A builds them in parallel, so B codes against these thin interfaces. B reads and
+// writes the contract tables in server/db/schema.sql directly (orders, blocklist, risk_payloads, and
+// reads sessions/quotes), so it does not depend on the names of A's typed helpers.
+//
+// WIRING (orchestrator, after A merges) — either call setPaypalDeps() once at startup in server/app.ts:
+//
+//   import { getDb } from './db';
+//   import { traceCode } from './mirage/decoys';
+//   import { emit } from './mirage/tripwire';
+//   import { setPaypalDeps } from './paypal/deps';
+//   setPaypalDeps({ getDb, traceCode, emit });
+//
+// or replace the three `notWired` defaults below with those imports.
+import type { DatabaseSync } from 'node:sqlite';
+import type { DecoyKind, TripEvent } from '../../shared/types';
+import { config } from '../config';
+import { createPayPalClient, type PayPalApi } from './client';
+import { createFakePayPal, type FakePayPal } from './fake';
+
+export const SIM_ORDER_PREFIX = 'SIM-';
+export const isSimOrderId = (orderId: string | undefined | null): boolean => Boolean(orderId?.startsWith(SIM_ORDER_PREFIX));
+
+export type EmitInput = Omit<TripEvent, 'id' | 'at'>;
+export interface TraceResult { sessionId: string; kind: DecoyKind }
+
+export interface PaypalLayerConfig {
+  /** MIRAGE_SIM=1: sim sessions may use SIM- orders and simulatedPayer. */
+  sim: boolean;
+  merchantId: string;
+  webhookId: string;
+  publicBaseUrl: string;
+  production: boolean;
+  hasPaypalKeys: boolean;
+}
+
+export interface PaypalLayerDeps {
+  getDb(): DatabaseSync;
+  traceCode(code: string): TraceResult | null;
+  emit(e: EmitInput): unknown;
+  /** Real sandbox REST client. Throws if keys are missing or PAYPAL_BASE isn't the sandbox. */
+  paypal(): PayPalApi;
+  /** In-process PayPal for SIM- orders (sim mode only). */
+  simPaypal(): FakePayPal;
+  config: PaypalLayerConfig;
+}
+
+const notWired = (name: string) => () => {
+  throw new Error(`paypal-layer: ${name} is not wired. Call setPaypalDeps({ getDb, traceCode, emit }) at startup (see server/paypal/deps.ts).`);
+};
+
+let realClient: PayPalApi | null = null;
+let simClient: FakePayPal | null = null;
+
+function defaults(): PaypalLayerDeps {
+  return {
+    getDb: notWired('getDb') as () => DatabaseSync,
+    traceCode: notWired('traceCode') as (code: string) => TraceResult | null,
+    emit: notWired('emit'),
+    paypal: () => (realClient ??= createPayPalClient({
+      clientId: config.paypal.clientId, clientSecret: config.paypal.clientSecret, base: config.paypal.base,
+    })),
+    simPaypal: () => (simClient ??= createFakePayPal({ idPrefix: SIM_ORDER_PREFIX })),
+    config: {
+      sim: config.sim,
+      merchantId: config.paypal.merchantId,
+      webhookId: config.paypal.webhookId,
+      publicBaseUrl: config.publicBaseUrl,
+      production: process.env.NODE_ENV === 'production',
+      hasPaypalKeys: Boolean(config.paypal.clientId && config.paypal.clientSecret),
+    },
+  };
+}
+
+let current: PaypalLayerDeps = defaults();
+
+export function setPaypalDeps(partial: Partial<PaypalLayerDeps>): void {
+  current = { ...current, ...partial, config: { ...current.config, ...(partial.config ?? {}) } };
+}
+
+export function getPaypalDeps(): PaypalLayerDeps {
+  return current;
+}
+
+/** Tests only. */
+export function resetPaypalDeps(): void {
+  current = defaults();
+}
+
+
+/** SIM- orders live in the in-process sim PayPal; everything else is the real sandbox. */
+export function paypalForOrder(deps: PaypalLayerDeps, orderId: string | undefined | null): PayPalApi {
+  return isSimOrderId(orderId) ? deps.simPaypal() : deps.paypal();
+}
