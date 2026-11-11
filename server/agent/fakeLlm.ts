@@ -123,5 +123,5 @@ export function respond(params: LlmParams): LlmResponse {
 }
 
 export function createFakeLlm(): LlmClient {
-  return { kind: 'fake', createMessage: async (params) => respond(params) };
+  return { kind: 'fake', createMessage: async (params, _purpose) => respond(params) };
 }

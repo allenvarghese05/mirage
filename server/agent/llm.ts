@@ -1,27 +1,23 @@
 // LLM client seam. The store agent talks to this interface, so tests and the sim can swap in a scripted fake.
-import Anthropic from '@anthropic-ai/sdk';
-import { config } from '../config';
+// The real client goes through createMessage() in server/llm.ts (hard rule 0: the $5 spend cap). Never call the SDK here.
+import type Anthropic from '@anthropic-ai/sdk';
+import { createMessage } from '../llm';
 import { createFakeLlm } from './fakeLlm';
 
 export type LlmParams = Anthropic.MessageCreateParamsNonStreaming;
 export type LlmResponse = Pick<Anthropic.Message, 'content' | 'stop_reason'>;
 
+export type LlmPurpose = 'store-agent' | 'classifier';
+
 export interface LlmClient {
-  /** 'real' = Anthropic API. 'fake' = deterministic script (MIRAGE_FAKE_LLM=1). 'mock' = injected by a test. */
+  /** 'real' = Anthropic API via server/llm.ts. 'fake' = deterministic script (MIRAGE_FAKE_LLM=1). 'mock' = injected by a test. */
   kind: 'real' | 'fake' | 'mock';
-  createMessage(params: LlmParams): Promise<LlmResponse>;
+  /** May throw BudgetExceededError (server/llm.ts) when the spend cap would be crossed. */
+  createMessage(params: LlmParams, purpose: LlmPurpose): Promise<LlmResponse>;
 }
 
 function createRealLlm(): LlmClient {
-  let client: Anthropic | null = null;
-  return {
-    kind: 'real',
-    async createMessage(params) {
-      // Uses the key from .secrets/dev.keys via config; falls back to the SDK's own credential lookup.
-      client ??= new Anthropic({ apiKey: config.anthropicKey || undefined, maxRetries: 2, timeout: 60_000 });
-      return client.messages.create(params);
-    },
-  };
+  return { kind: 'real', createMessage: (params, purpose) => createMessage(params, { purpose }) };
 }
 
 let current: LlmClient | null = null;

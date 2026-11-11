@@ -1,6 +1,7 @@
 // The store agent: one chat turn = an Anthropic tool-use loop over our tools, with tripwires around it.
 import type Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
+import { BudgetExceededError } from '../llm';
 import { addMessage, createSession, getSession, listEvents, listMessages, type SessionRow } from '../db';
 import { getDecoyKit, makeDecoyKit } from '../mirage/decoys';
 import { findDecoys } from '../mirage/leaks';
@@ -13,6 +14,7 @@ import type { ChatMessage, StoreId, StoreMode } from '../../shared/types';
 
 const MAX_TOOL_ROUNDS = 6;
 const FALLBACK_REPLY = 'Sorry, I lost my train of thought there. Could you say that again?';
+export const UNAVAILABLE_REPLY = 'Our assistant is unavailable right now. Please try again a little later.';
 
 export class SessionNotFoundError extends Error {}
 
@@ -78,7 +80,7 @@ export async function runAgentTurn(sessionId: string, userText: string): Promise
         system,
         tools,
         messages,
-      });
+      }, 'store-agent');
       for (const b of res.content) if (b.type === 'text' && b.text.trim()) texts.push(b.text.trim());
       if (res.stop_reason !== 'tool_use') break;
 
@@ -93,6 +95,12 @@ export async function runAgentTurn(sessionId: string, userText: string): Promise
       }
       messages.push({ role: 'user', content: results });
     }
+  } catch (err) {
+    if (!(err instanceof BudgetExceededError)) throw err;
+    // Spend cap reached: nothing was sent. Tell the shopper plainly instead of failing the request.
+    console.warn('[agent] Claude budget reached; replying unavailable.');
+    texts.length = 0;
+    texts.push(UNAVAILABLE_REPLY);
   } finally {
     await classifying;
   }
