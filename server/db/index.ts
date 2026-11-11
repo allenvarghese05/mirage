@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { config } from '../config';
 import { SEED_PAST_ORDERS } from '../catalog';
+import type { AgentProfile } from '../agent/profile';
 import type {
   ChatMessage, DecoyKind, PayerIdentity, PublicOrderStatus, SessionMode, SimRun, StoreId, StoreMode, TripEvent,
 } from '../../shared/types';
@@ -24,8 +25,15 @@ function open(path: string): DatabaseSync {
   const d = new DatabaseSync(path);
   d.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   d.exec(readFileSync(SCHEMA_PATH, 'utf8'));
+  migrate(d);
   seedPastOrders(d);
   return d;
+}
+
+/** Additive columns for database files created before the column existed in schema.sql. */
+export function migrate(d: DatabaseSync): void {
+  const cols = new Set((d.prepare('PRAGMA table_info(sessions)').all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has('agent_profile')) d.exec('ALTER TABLE sessions ADD COLUMN agent_profile TEXT');
 }
 
 function seedPastOrders(d: DatabaseSync): void {
@@ -62,22 +70,25 @@ const parseJson = <T>(v: unknown, fallback: T): T => {
 export interface SessionRow {
   id: string; storeId: StoreId; storeMode: StoreMode; mode: SessionMode; seq: number;
   clientMetadataId: string; ip?: string; userAgent?: string; simRunId?: string; createdAt: string;
+  /** Store-agent prompt profile at session start. Sessions from before profiles existed ran the hardened prompt. */
+  agentProfile: AgentProfile;
 }
 
 const toSession = (r: Row): SessionRow => ({
   id: String(r.id), storeId: r.store_id as StoreId, storeMode: r.store_mode as StoreMode, mode: r.mode as SessionMode,
   seq: Number(r.seq), clientMetadataId: String(r.client_metadata_id), ip: str(r.ip), userAgent: str(r.user_agent),
   simRunId: str(r.sim_run_id), createdAt: String(r.created_at),
+  agentProfile: r.agent_profile === 'realistic' ? 'realistic' : 'hardened',
 });
 
-export function createSession(input: { storeId: StoreId; storeMode: StoreMode; simRunId?: string; ip?: string; userAgent?: string }): SessionRow {
+export function createSession(input: { storeId: StoreId; storeMode: StoreMode; simRunId?: string; ip?: string; userAgent?: string; agentProfile?: AgentProfile }): SessionRow {
   const d = getDb();
   const id = `s_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const { next } = d.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM sessions').get() as { next: number };
   d.prepare(
-    'INSERT INTO sessions (id, store_id, store_mode, mode, seq, client_metadata_id, ip, user_agent, sim_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO sessions (id, store_id, store_mode, mode, seq, client_metadata_id, ip, user_agent, sim_run_id, agent_profile, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(id, input.storeId, input.storeMode, 'normal', next, randomBytes(16).toString('hex'),
-    input.ip ?? null, input.userAgent ?? null, input.simRunId ?? null, now());
+    input.ip ?? null, input.userAgent ?? null, input.simRunId ?? null, input.agentProfile ?? 'realistic', now());
   return getSession(id)!;
 }
 

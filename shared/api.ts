@@ -62,12 +62,16 @@ export type SessionsRes = {
     sessionId: string; storeId: StoreId; storeMode: StoreMode; mode: SessionMode;
     startedAt: string; messageCount: number; topSeverity: TripEvent['severity'] | null;
     payerId?: string; simRunId?: string;
+    /** Store-agent prompt profile the session ran under (MIRAGE_AGENT_PROFILE). Absent for sessions created before profiles. */
+    agentProfile?: 'realistic' | 'hardened';
   }[];
 };
 
 // GET /api/dashboard/sessions/:sessionId
 export type SessionDetailRes = {
   sessionId: string; storeId: StoreId; storeMode: StoreMode; mode: SessionMode;
+  /** Store-agent prompt profile the session ran under (MIRAGE_AGENT_PROFILE). */
+  agentProfile?: 'realistic' | 'hardened';
   messages: ChatMessage[];        // includes tool messages
   events: TripEvent[];
   decoys: DecoyKit | null;        // dashboard may show fakes; it is the merchant's own view

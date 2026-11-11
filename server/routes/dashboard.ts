@@ -60,7 +60,7 @@ dashboardRouter.get('/api/dashboard/sessions', (_req, res) => {
     sessions: listSessions().map((s) => {
       const payer = attackerIdentity(s.id);
       return {
-        sessionId: s.id, storeId: s.storeId, storeMode: s.storeMode, mode: s.mode, startedAt: s.createdAt,
+        sessionId: s.id, storeId: s.storeId, storeMode: s.storeMode, mode: s.mode, startedAt: s.createdAt, agentProfile: s.agentProfile,
         messageCount: countMessages(s.id), topSeverity: topSeverity(listEvents({ sessionId: s.id })),
         ...(payer ? { payerId: payer.payerId } : {}), ...(s.simRunId ? { simRunId: s.simRunId } : {}),
       };
@@ -75,7 +75,7 @@ dashboardRouter.get('/api/dashboard/sessions/:sessionId', (req, res) => {
   const events = listEvents({ sessionId: s.id });
   const orders = listOrdersForSession(s.id);
   const body: SessionDetailRes = {
-    sessionId: s.id, storeId: s.storeId, storeMode: s.storeMode, mode: s.mode,
+    sessionId: s.id, storeId: s.storeId, storeMode: s.storeMode, mode: s.mode, agentProfile: s.agentProfile,
     messages: listMessages(s.id),
     events,
     decoys: getDecoyKit(s.id),
