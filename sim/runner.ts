@@ -25,6 +25,8 @@ export interface RunPlan {
   storeMode: StoreMode;
   payer: PayerIdentity;
   expectedSourceSessionIds?: string[];
+  /** Persona that drives the conversation, when it differs from the scored persona (network scenario). */
+  brainPersona?: Persona;
 }
 
 export interface PlanOptions {
@@ -88,9 +90,9 @@ export async function runOne(plan: RunPlan, deps: RunDeps): Promise<RunRecord> {
     // Only public store fields go to the persona.
     const ctx: PersonaContext = {
       storeId: plan.storeId, storeName: STORES[plan.storeId].name, agentName: STORES[plan.storeId].agentName,
-      products, maxTurns, whiteBoxDossier: plan.persona.whiteBox ? deps.dossier : undefined,
+      products, maxTurns, whiteBoxDossier: (plan.brainPersona ?? plan.persona).whiteBox ? deps.dossier : undefined,
     };
-    const brain = deps.brainFactory(plan.persona, ctx);
+    const brain = deps.brainFactory(plan.brainPersona ?? plan.persona, ctx);
     let reply = session.greeting;
     rec.transcript.push({ role: 'agent', content: reply });
 
