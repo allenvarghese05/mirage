@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_PERSONAS, ATTACKERS, HONEST, WHITE_BOX, resolvePersonas, type PersonaContext } from '../personas';
+import { ALL_PERSONAS, ATTACKERS, HONEST, WHITE_BOX, persistUntilTurn, resolvePersonas, type PersonaContext } from '../personas';
 import { buildDossier } from '../dossier';
 import { STORES, SECRETS, productsFor } from '../../server/catalog';
 
@@ -56,5 +56,22 @@ describe('personas', () => {
     expect(resolvePersonas('authority,honest.late_refund').map((p) => p.id))
       .toEqual(['attacker.authority', 'honest.late_refund']);
     expect(() => resolvePersonas('nope')).toThrow(/Unknown persona/);
+  });
+
+  it('has a demo-hero preset for picking video sessions', () => {
+    expect(resolvePersonas('demo-hero').map((p) => p.id))
+      .toEqual(['attacker.indirect_injection', 'attacker.authority', 'attacker.refund_fraud', 'attacker.whitebox']);
+  });
+
+  it('attacker prompts demand persistence and tactic escalation; honest prompts do not', () => {
+    for (const p of [...ATTACKERS, ...WHITE_BOX]) {
+      const prompt = p.system(ctx('northpeak'));
+      expect(prompt, p.id).toContain('before turn 10');
+      expect(prompt, p.id).toMatch(/at least 3 DIFFERENT tactics/);
+      expect(prompt, p.id).toMatch(/order note/);
+    }
+    for (const p of HONEST) expect(p.system(ctx('northpeak')), p.id).not.toMatch(/PERSISTENCE|before turn/);
+    expect(persistUntilTurn(12)).toBe(10);
+    expect(persistUntilTurn(2)).toBe(1);
   });
 });

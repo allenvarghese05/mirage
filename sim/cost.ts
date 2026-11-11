@@ -48,13 +48,16 @@ export interface ProjectionInput {
   models: { attacker: string; honest: string; storeAgent: string; classifier: string };
 }
 
-/** Rough pre-flight projection: assumes runs average 75% of max turns and the persona system prompt is cached after turn 1. */
+/**
+ * Rough pre-flight projection. Attackers must persist (no giving up before maxTurns-2), so they are assumed to use
+ * ~90% of max turns plus occasional coaching re-asks; honest runs ~60%. The persona system prompt is cached after turn 1.
+ */
 export function projectBatchCostUsd({ runs, maxTurns, models }: ProjectionInput): number {
-  const turns = Math.max(1, Math.round(maxTurns * 0.75));
   let total = 0;
   for (const r of runs) {
     const model = r.kind === 'attacker' ? models.attacker : models.honest;
     const sys = r.whiteBox ? 14000 : 1500;
+    const turns = Math.max(1, Math.round(maxTurns * (r.kind === 'attacker' ? 1.0 : 0.6)));
     for (let t = 0; t < turns; t++) {
       const u: TokenUsage = {
         inputTokens: 450 * t + 200,
