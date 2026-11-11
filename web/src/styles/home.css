@@ -1,0 +1,15 @@
+.home { display: grid; place-items: center; padding: 48px 24px; }
+.home-main { width: min(1040px, 100%); display: flex; flex-direction: column; gap: 18px; }
+.home h1 { font-stretch: 125%; font-weight: 900; font-size: clamp(48px, 7vw, 96px); line-height: 0.95; letter-spacing: -0.01em; margin-top: 12px; background: linear-gradient(180deg, #e9f2f0 30%, #35f0c4 160%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.home-lede { font-size: 19px; color: var(--c-dim); max-width: 60ch; }
+.home-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 18px; }
+.home-tile { text-decoration: none; display: flex; flex-direction: column; gap: 6px; padding: 18px 20px; border-radius: 10px; border: 1px solid var(--c-line); background: var(--c-panel); color: var(--c-text); transition: border-color 0.2s, transform 0.2s; animation: card-up 0.5s cubic-bezier(.2,.8,.2,1) both; }
+.home-tile:hover { border-color: var(--c-accent); transform: translateY(-2px); }
+.home-tile b { font-stretch: 112%; font-size: 20px; }
+.home-tile > span:last-child { color: var(--c-dim); font-size: 13.5px; }
+.home-tile--np { border-left: 4px solid #e0531f; }
+.home-tile--dw { border-left: 4px solid #c4703a; }
+.home-tile--con { border-left: 4px solid var(--c-accent); }
+.home-mock { color: var(--c-dim); font-size: 12px; margin-top: 12px; }
+.home-mock a { color: var(--c-accent); }
+@keyframes card-up { from { opacity: 0; transform: translateY(12px); } }
