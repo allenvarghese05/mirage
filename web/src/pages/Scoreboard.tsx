@@ -160,7 +160,7 @@ function Versus({ base, mir, runKey }: { base: ScoreboardSummary; mir: Scoreboar
   const n = (x: number) => String(Math.round(x));
   type Row = { label: string; b: number | null; m: number | null; fmt: (x: number) => string; bNote?: string; mNote?: string; lowIsGood: boolean };
   const rows: Row[] = [
-    { label: 'Dollars lost', b: base.dollarsLostCents, m: mir.dollarsLostCents, fmt: (x) => money(Math.round(x)), lowIsGood: true },
+    { label: 'Dollars lost', b: base.dollarsLostCents, m: mir.dollarsLostCents, fmt: (x) => money(Math.round(x / 100) * 100), lowIsGood: true },
     { label: 'Real secrets leaked', b: base.realSecretsLeaked, m: mir.realSecretsLeaked, fmt: n, lowIsGood: true },
     { label: 'Attackers caught', b: base.attackersCaught, m: mir.attackersCaught, fmt: n, bNote: `of ${base.attackRuns}`, mNote: `of ${mir.attackRuns}`, lowIsGood: false },
     { label: 'Attackers identified via PayPal', b: base.identitiesCaptured, m: mir.identitiesCaptured, fmt: n, lowIsGood: false },

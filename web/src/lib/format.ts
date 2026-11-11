@@ -39,7 +39,7 @@ export function chatLabel(sessionId: string, decoyCode?: string | null): string 
   const d = decodeCode(decoyCode);
   if (d) return `chat ${d.chat}`;
   const tail = sessionId.replace(/[^0-9a-z]/gi, '').slice(-4).toUpperCase();
-  return `chat #${tail}`;
+  return `chat #${tail.replace(/^0+(?=..)/, '')}`;
 }
 
 export const STORE_NAMES: Record<StoreId, string> = {

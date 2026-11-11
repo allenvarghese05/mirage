@@ -14,7 +14,8 @@
 .demo--attacker .da-chat .chat-bubble { font-size: 18px; max-width: 86%; }
 .demo--attacker .da-chat .chat-head b { font-size: 24px; }
 .demo--split .da-chat .chat-bubble { font-size: 15px; }
-.da-chat .chat-log { scroll-behavior: smooth; }
+.da-chat .chat-log { scrollbar-width: none; }
+.da-chat .chat-log::-webkit-scrollbar { display: none; }
 .da-input textarea { pointer-events: none; }
 .da-side { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
 .da-product { animation: none; }

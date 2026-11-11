@@ -42,13 +42,17 @@ export function AgentAvatar({ brand }: { brand: Brand }) {
   );
 }
 
-export function ChatLog({ brand, lines, typing }: { brand: Brand; lines: ChatLine[]; typing?: boolean }) {
-  const end = useRef<HTMLDivElement>(null);
+export function ChatLog({ brand, lines, typing, instantScroll }: { brand: Brand; lines: ChatLine[]; typing?: boolean; instantScroll?: boolean }) {
+  const box = useRef<HTMLDivElement>(null);
+  const size = lines.reduce((n, l) => n + (l.reveal ?? l.content.length), lines.length) + (typing ? 1 : 0);
   useEffect(() => {
-    end.current?.scrollIntoView?.({ block: 'end', behavior: 'smooth' });
-  }, [lines, typing]);
+    const el = box.current;
+    if (!el) return;
+    if (instantScroll) el.scrollTop = el.scrollHeight;
+    else el.scrollTo?.({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [size, instantScroll]);
   return (
-    <div className="chat-log" role="log" aria-live="polite">
+    <div className="chat-log" role="log" aria-live="polite" ref={box}>
       {lines.map((l) => {
         const text = l.reveal === undefined ? l.content : l.content.slice(0, l.reveal);
         const isTyping = l.reveal !== undefined && l.reveal < l.content.length;
@@ -70,7 +74,6 @@ export function ChatLog({ brand, lines, typing }: { brand: Brand; lines: ChatLin
           </div>
         </div>
       )}
-      <div ref={end} />
     </div>
   );
 }

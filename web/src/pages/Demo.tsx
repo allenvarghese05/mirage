@@ -57,11 +57,15 @@ export function Demo() {
   const timeline = useMemo(() => (detail ? buildTimeline(detail) : null), [detail]);
 
   // ------------------------------------------------ playback clock
-  const [now, setNow] = useState(0);
+  const startAt = Math.max(0, Number(params.get('t')) || 0) * 1000; // ?t=40 starts 40 s in (handy for recording a beat)
+  const [now, setNow] = useState(startAt);
   const [playing, setPlaying] = useState(false);
   const [rewinding, setRewinding] = useState(false);
-  const nowRef = useRef(0);
+  const nowRef = useRef(startAt);
   const total = timeline?.total ?? 1;
+  useEffect(() => {
+    if (timeline && nowRef.current > timeline.total) { nowRef.current = timeline.total; setNow(timeline.total); }
+  }, [timeline]);
 
   useEffect(() => {
     if (!timeline || !autoplay) return;
@@ -222,7 +226,7 @@ function AttackerView({ detail, items, now, orderMsgs, split }: {
             <AgentAvatar brand={brand} />
             <div><b>{brand.agentName}</b><small><i className="online-dot" /> {brand.agentRole}</small></div>
           </header>
-          <ChatLog brand={brand} lines={lines} typing={typing} />
+          <ChatLog brand={brand} lines={lines} typing={typing} instantScroll />
           <div className="chat-input da-input"><textarea rows={1} placeholder={`Message ${brand.agentName}…`} readOnly tabIndex={-1} /><button type="button" tabIndex={-1} aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 12 L20 4 L14 20 L11 13 Z" fill="currentColor" /></svg></button></div>
         </div>
         <aside className="da-side">
@@ -243,7 +247,7 @@ function AttackerView({ detail, items, now, orderMsgs, split }: {
               {code && pct > 0 && <p className="da-label">Staff pricing ({pct}% off)</p>}
               {!(statusAt !== undefined && now >= statusAt) && (
                 <div className={`paypal-sim-btn da-pp${identity && now >= identity.t - 1800 ? ' is-busy' : ''}`}>
-                  {identity && now >= identity.t - 1800 ? 'Approving in PayPal…' : <>Pay with <b>PayPal</b></>}
+                  <span>{identity && now >= identity.t - 1800 ? 'Approving in PayPal…' : <>Pay with <b>PayPal</b></>}</span>
                 </div>
               )}
             </div>

@@ -86,12 +86,12 @@ export function PayPalCheckout({ order, sessionId, onDone }: {
     <div className="paypal-zone">
       {mock ? (
         <button type="button" className="paypal-sim-btn" onClick={simulateApprove} disabled={busy}>
-          {busy ? 'Confirming…' : <>Pay with <b>PayPal</b></>}
+          <span>{busy ? 'Confirming…' : <>Pay with <b>PayPal</b></>}</span>
           <small>mock mode · simulated sandbox approval</small>
         </button>
       ) : clientId === null ? (
         <a className="paypal-sim-btn" href={order.approveUrl}>
-          Pay with <b>PayPal</b>
+          <span>Pay with <b>PayPal</b></span>
           <small>continue to PayPal sandbox checkout</small>
         </a>
       ) : (

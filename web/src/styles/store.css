@@ -317,6 +317,7 @@
 .chat-input button:disabled { opacity: 0.4; }
 .chat-mark { background: none; color: inherit; border-radius: 3px; padding: 0 2px; }
 .chat-mark--inject { background: rgba(225, 29, 52, 0.18); box-shadow: inset 0 -2px 0 #e11d34; color: #9b0f22; }
+.chat-bubble--user .chat-mark--inject { background: rgba(255, 77, 94, 0.42); color: #fff; box-shadow: inset 0 -2px 0 #ff4d5e; }
 .chat-mark--score { background: #ffe066; color: #1a1300; box-shadow: 0 0 0 2px #ffe066; font-weight: 600; }
 
 /* order page */
@@ -327,7 +328,7 @@
   animation: rise 0.5s cubic-bezier(.2,.7,.2,1) both;
 }
 .store--northpeak .order-card { border: 1.5px solid var(--ink); box-shadow: 8px 8px 0 var(--brand); }
-.order-icon { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 30px; background: var(--bg-2); color: var(--brand); }
+.order-icon { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 38px; line-height: 1; background: var(--bg-2); color: var(--brand); }
 .order-card--completed .order-icon { background: var(--brand); color: var(--brand-ink); }
 .order-kicker { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--muted); letter-spacing: 0.06em; }
 .order-card h1 { font-family: var(--display); text-transform: var(--display-case); font-size: 44px; line-height: 1; font-weight: 800; }
