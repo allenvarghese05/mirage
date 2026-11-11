@@ -62,8 +62,9 @@ function estimateInputTokens(params: Anthropic.MessageCreateParamsNonStreaming):
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
+  if (client) return client;
   if (!config.anthropicKey) throw new Error('ANTHROPIC_API_KEY missing in .secrets/dev.keys');
-  client ??= new Anthropic({ apiKey: config.anthropicKey });
+  client = new Anthropic({ apiKey: config.anthropicKey });
   return client;
 }
 
