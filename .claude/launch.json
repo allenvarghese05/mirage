@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mirage-demo-data",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "MIRAGE_DB=data/smoke2.sqlite PORT=8787 npm run dev"],
+      "port": 5173
+    },
+    {
+      "name": "mirage-dev",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "PORT=8787 npm run dev"],
+      "port": 5173
+    }
+  ]
+}

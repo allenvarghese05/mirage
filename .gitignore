@@ -10,3 +10,7 @@ data/
 test-results/
 playwright-report/
 .DS_Store
+
+# Claude Code session worktrees (keep launch.json)
+.claude/*
+!.claude/launch.json
