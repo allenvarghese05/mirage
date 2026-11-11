@@ -38,6 +38,7 @@
     "@types/supertest": "^7.2.1",
     "@vitejs/plugin-react": "^6.3.0",
     "concurrently": "^10.0.7",
+    "happy-dom": "^21.0.4",
     "supertest": "^7.3.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
