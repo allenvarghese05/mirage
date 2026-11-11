@@ -51,11 +51,13 @@ const routes: [string, string[]][] = [
   ['/store/northpeak/order/5UX02847KD392514M', ['Order received', 'pending review. You have not been charged.']],
   ['/dashboard', ['Alerts', 'Devin Marsh', 'signature valid', 'Sent to PayPal Risk', 'Network']],
   ['/scoreboard', ['Normal store', 'Mirage', 'run_001', 'White-box only']],
-  ['/demo?session=ses_np_7f3a00a7&view=split&t=200&autoplay=0', ['Order held. Never captured.', 'Decoy kit planted for chat #A7', 'Mock data']],
-  ['/demo?session=ses_np_7f3a00a7&view=attacker&t=10&autoplay=0', ['Juniper', 'REWIND']],
+  ['/demo?session=ses_np_7f3a00a7&view=split&t=200&autoplay=0', ['The order is held. Nothing was charged.', 'Held for review', 'Mock data']],
+  ['/demo?session=ses_np_7f3a00a7&view=mirage&t=200&autoplay=0', ['The order is held. Nothing was charged.', 'Who it was', 'Traced to this chat', 'Mock data']],
+  ['/demo?session=ses_np_7f3a00a7&view=mirage&t=0&autoplay=0', ['A shopper starts chatting with Juniper.', 'The agent holds only fakes']],
+  ['/demo?session=ses_np_7f3a00a7&view=attacker&t=10&autoplay=0', ['Juniper', 'Rewind']],
   // shaped like the real server: s_<hex> id, classifier slugs, fake-floor trap stored as floor:<product>:<cents>:<session>
   ['/dashboard?session=s_9b2e71c04fa3d816', ['Fake floor price traced', 'planted only there', 'chat #B6', 'probing for staff secrets', 'fake floor $148.33']],
-  ['/demo?session=s_9b2e71c04fa3d816&view=split&t=200&autoplay=0', ['Price agreed in chat', 'Fake floor price traced', '$220.00']],
+  ['/demo?session=s_9b2e71c04fa3d816&view=split&t=200&autoplay=0', ['Price agreed in chat', 'The order is held. Nothing was charged.', '$220.00']],
   // PayPal redirect return (B's return_url) lands on the order page
   ['/store/northpeak?checkout=return&token=5UX02847KD392514M&PayerID=XYZ', ['Order received', 'pending review']],
   ['/store/driftwood?checkout=cancel', ['PayPal checkout was cancelled. You have not been charged.']],

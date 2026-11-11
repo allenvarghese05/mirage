@@ -7,15 +7,15 @@ import { BRANDS } from '../store/brands';
 import { StoreChrome } from '../store/StoreChrome';
 import { AgentAvatar, ChatLog, type ChatLine } from '../store/ChatLog';
 import { ProductArt } from '../store/ProductArt';
-import { MirageLogo } from '../console/Chrome';
-import { IdentityCard, PRODUCT_NAMES, RedemptionTrace } from '../console/Panels';
+import { PRODUCT_NAMES } from '../console/Panels';
+import { MirageStory } from '../demo/MirageStory';
 import { buildTimeline, findInjections, revealAt, type ReplayItem } from '../lib/replay';
-import { kindMeta, STORE_NAMES, chatLabel, decodeCode, eventHeadline, learnFromEvents, money, moneyExact, parseFloorCode, prettyCode, registerSessionCode, sessionDecoyCode, shortDate, techniqueLabel } from '../lib/format';
+import { kindMeta, decodeCode, learnFromEvents, moneyExact, parseFloorCode, registerSessionCode, shortDate } from '../lib/format';
 import '../styles/store.css';
 import '../styles/console.css';
 import '../styles/demo.css';
 
-type View = 'attacker' | 'split';
+type View = 'attacker' | 'mirage' | 'split';
 const SPEEDS = [0.5, 1, 1.5, 2, 3];
 const STAFF_PCT: Record<string, number> = { northpeak: 40, driftwood: 35 };
 
@@ -26,7 +26,7 @@ export function Demo() {
   const [orderMsgs, setOrderMsgs] = useState<Record<string, PublicOrderStatus>>({});
   const [listPrices, setListPrices] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
-  const view: View = params.get('view') === 'split' ? 'split' : 'attacker';
+  const view: View = params.get('view') === 'split' ? 'split' : params.get('view') === 'mirage' ? 'mirage' : 'attacker';
   const speed = Number(params.get('speed')) > 0 ? Number(params.get('speed')) : 1;
   const chrome = params.get('chrome') !== '0';
   const autoplay = params.get('autoplay') !== '0';
@@ -95,7 +95,7 @@ export function Demo() {
         setNow(nowRef.current);
         if (p >= 1) {
           setRewinding(false);
-          setParam('view', 'split');
+          setParam('view', 'mirage');
           resumeTimer.current = setTimeout(() => setPlaying(true), 700);
           return;
         }
@@ -143,12 +143,8 @@ export function Demo() {
   return (
     <div className={`demo c-theme demo--${view}${rewinding ? ' is-rewinding' : ''}${playing ? ' is-playing' : ''}`}>
       <div className="demo-stage">
-        <AttackerView detail={detail} items={timeline.items} now={now} orderMsgs={orderMsgs} listPrices={listPrices} />
-        {view === 'split' && <ConsoleView detail={detail} items={timeline.items} now={now} />}
-      </div>
-
-      <div className={`demo-tag${mock ? ' is-mock' : ''}`}>
-        <i aria-hidden="true" />{mock ? 'Mock data · not a real session' : `Real sandbox session · recorded ${recordedAt ? shortDate(recordedAt) : ''}`}
+        {view !== 'mirage' && <AttackerView detail={detail} items={timeline.items} now={now} orderMsgs={orderMsgs} listPrices={listPrices} />}
+        {view !== 'attacker' && <MirageStory detail={detail} events={shownEvents} compact={view === 'split'} mock={mock} />}
       </div>
 
       {rewinding && (
@@ -169,11 +165,11 @@ export function Demo() {
             <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M3.2 8a4.8 4.8 0 1 0 1.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><path d="M4.4 1.9v2.9h2.9" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
           {/* the attacker's view must not spoil the twist: beat names and colored markers only in split */}
-          {view === 'split' && <span className={`dp-beat tone-${beat.tone}`} aria-live="polite"><i aria-hidden="true" />{beat.label}</span>}
+          {view !== 'attacker' && <span className={`dp-beat tone-${beat.tone}`} aria-live="polite"><i aria-hidden="true" />{beat.label}</span>}
           <div className="dp-scrub">
             <span className="dp-track" aria-hidden="true" />
             <span className="dp-fill" style={{ width: `${(now / total) * 100}%` }} aria-hidden="true" />
-            {view === 'split' && marks.map((m) => (
+            {view !== 'attacker' && marks.map((m) => (
               <span key={m.e.id} className={`dp-mark tone-${kindMeta(m.e.kind).tone}${m.t <= now ? ' is-past' : ''}`} style={{ left: `${(m.t / total) * 100}%` }} aria-hidden="true" />
             ))}
             <input type="range" min={0} max={total} value={now} step={50} onChange={(e) => seek(Number(e.target.value))} aria-label="Scrub" aria-valuetext={`${clockOf(now)} of ${clockOf(total)}`} />
@@ -184,13 +180,17 @@ export function Demo() {
           </select>
           <span className="dp-sep" aria-hidden="true" />
           <div className="dp-seg" role="group" aria-label="View">
-            <button type="button" className={view === 'attacker' ? 'on' : ''} aria-pressed={view === 'attacker'} onClick={() => setParam('view', 'attacker')}>Attacker</button>
-            <button type="button" className={view === 'split' ? 'on' : ''} aria-pressed={view === 'split'} onClick={() => setParam('view', 'split')}>Split</button>
+            <button type="button" className={view === 'attacker' ? 'on' : ''} aria-pressed={view === 'attacker'} onClick={() => setParam('view', 'attacker')}>Store</button>
+            <button type="button" className={view === 'mirage' ? 'on' : ''} aria-pressed={view === 'mirage'} onClick={() => setParam('view', 'mirage')}>Mirage</button>
+            <button type="button" className={view === 'split' ? 'on' : ''} aria-pressed={view === 'split'} onClick={() => setParam('view', 'split')}>Both</button>
           </div>
-          <button type="button" className={`dp-rewind${atEnd && view === 'attacker' ? ' pulse' : ''}`} onClick={rewind} title="Rewind and replay from Mirage's side (R)">
-            <RewindIcon size={13} />REWIND
-          </button>
-          <Link to={`/dashboard?session=${encodeURIComponent(detail.sessionId)}`} className="dp-link">Console ↗</Link>
+          {view === 'attacker' && (
+            <button type="button" className={`dp-rewind${atEnd ? ' pulse' : ''}`} onClick={rewind} title="Rewind and replay from Mirage's side (R)">
+              <RewindIcon size={13} />Rewind
+            </button>
+          )}
+          {view === 'attacker' && <span className={`dp-note${mock ? ' is-mock' : ''}`}>{mock ? 'Mock data' : `Real sandbox session · ${recordedAt ? shortDate(recordedAt) : ''}`}</span>}
+          <Link to={`/dashboard?session=${encodeURIComponent(detail.sessionId)}`} className="dp-link">Open in console</Link>
         </div>
       )}
     </div>
@@ -323,188 +323,5 @@ function AttackerView({ detail, items, now, orderMsgs, listPrices }: {
         </aside>
       </div>
     </section>
-  );
-}
-
-// ---------------------------------------------------------------- right: what Mirage saw
-function ConsoleView({ detail, items, now }: { detail: SessionDetailRes; items: ReplayItem[]; now: number }) {
-  const shown = items.filter((it): it is EvtItem => it.kind === 'evt' && it.t <= now);
-  const events = shown.map((s) => s.e);
-  const code = sessionDecoyCode(detail.events, detail.decoys?.staffCode);
-  const label = chatLabel(detail.sessionId, code);
-  const shadow = events.some((e) => e.kind === 'HONEY_TOOL_CALLED');
-  const redeems = events.filter((e) => e.kind === 'DECOY_REDEEMED');
-  const redeem = redeems.find((e) => e.detail.stage !== 'quote') ?? redeems[0];
-  const identity = events.find((e) => e.kind === 'IDENTITY_CAPTURED' || e.kind === 'NETWORK_MATCH');
-  const network = events.find((e) => e.kind === 'NETWORK_MATCH');
-  const held = events.find((e) => e.kind === 'ORDER_HELD');
-  const leakCount = events.filter((e) => e.kind === 'DECOY_LEAKED').length;
-  const floorOrder = detail.orders.map((o) => parseFloorCode(o.codeUsed)).find(Boolean);
-  const leakedProduct = detail.events.find((e) => e.kind === 'DECOY_LEAKED' && typeof e.detail.productId === 'string')?.detail.productId as string | undefined;
-  const product = leakedProduct ?? floorOrder?.productId ?? Object.keys(detail.decoys?.fakeFloorCents ?? {})[0];
-  const toolCalls = items.filter((it) => it.kind === 'msg' && it.m.role === 'tool' && it.t <= now && detail.decoys?.honeyTools.includes(it.m.toolName ?? ''));
-  const heldOrder = detail.orders.find((o) => o.trapped);
-  const feed = [...shown].reverse().filter(({ e }) => !isNoise(e));
-
-  return (
-    <section className="demo-console" aria-label="Mirage console">
-      <header className="dc-head">
-        <MirageLogo size={22} />
-        <span className="dc-title">What Mirage saw</span>
-        <span className="dc-session">{label} · {STORE_NAMES[detail.storeId]}</span>
-        <span className={`c-badge mode-${shadow ? 'shadow' : 'normal'}`}>{shadow ? 'Shadow mode' : 'Normal mode'}</span>
-      </header>
-
-      <div className="dc-body">
-        <section className="dc-card dc-trace-card">
-          <div className="dc-card-head">
-            <h4>What happened in {label}</h4>
-            <span className="dc-card-meta">Replay of a recorded session</span>
-          </div>
-          <ReplayTrace detail={detail} events={events} />
-        </section>
-
-        <div className="dc-grid">
-          <div className="dc-col">
-            {detail.decoys ? (
-              <section className="dc-card dc-kit">
-                <span className="dc-kicker">Before the first message</span>
-                <h4>Decoy kit planted for {label}</h4>
-                <dl>
-                  {product && detail.decoys.fakeFloorCents[product] !== undefined && (
-                    <div><dt>Fake floor · {PRODUCT_NAMES[product] ?? product}</dt><dd className="mono">{moneyExact(detail.decoys.fakeFloorCents[product])}</dd></div>
-                  )}
-                  <div><dt>Fake staff code</dt><dd className="mono">{detail.decoys.staffCode}</dd></div>
-                  <div><dt>Fake tools</dt><dd className="mono">{detail.decoys.honeyTools.length}</dd></div>
-                </dl>
-                <p className="dc-real">Real floor price: <b>server only</b>. The agent never sees it.</p>
-              </section>
-            ) : (
-              <section className="dc-card dc-kit"><h4>Comparison store</h4><p className="dc-real">No decoys. This agent holds the real secrets.</p></section>
-            )}
-
-            <div className="dc-stats">
-              <div className={leakCount ? 'tone-leak is-on' : ''}><b className="mono">{leakCount}</b><span>fake secrets leaked</span></div>
-              <div className="tone-held is-on"><b className="mono">0</b><span>real secrets leaked</span></div>
-              <div className={toolCalls.length ? 'tone-leak is-on' : ''}><b className="mono">{toolCalls.length}</b><span>fake tools used</span></div>
-            </div>
-
-            <section className="dc-card dc-feed-card">
-              <span className="dc-kicker">Event log</span>
-              {feed.length ? (
-                <ul className="dc-feed">{feed.map(({ e }) => <FeedRow key={e.id} e={e} />)}</ul>
-              ) : (
-                <p className="dc-empty">Listening. Nothing flagged yet.</p>
-              )}
-            </section>
-          </div>
-
-          <div className="dc-col">
-            {!redeem && !identity && !held && (
-              <div className="dc-wait">
-                <b>Nothing used yet</b>
-                <span>If a planted code or price reaches checkout, Mirage traces it to this chat and PayPal tells us who paid.</span>
-              </div>
-            )}
-            {redeem && (
-              <section className="dc-card dc-spot tone-honey">
-                <span className="dc-spot-kicker"><i aria-hidden="true" />{redeem.detail.decoyKind === 'fake_floor' || parseFloorCode(String(redeem.detail.decoyCode ?? '')) ? 'Fake floor price traced' : 'Code traced'}</span>
-                <RedemptionTrace e={redeem} />
-              </section>
-            )}
-            {identity && (
-              <section className="dc-card dc-spot tone-identity">
-                <span className="dc-spot-kicker"><i aria-hidden="true" />{network ? 'Network match · seen at another store' : 'Identity captured via PayPal'}</span>
-                <IdentityCard identity={detail.identity ?? { payerId: String(identity.detail.payerId ?? 'unknown'), name: identity.detail.name as string | undefined }} storeId={detail.storeId} network={!!network} />
-              </section>
-            )}
-            {held && (
-              <section className="dc-held tone-held">
-                <div>
-                  <b>Order held. Never captured.</b>
-                  <span>{String(held.detail.orderId ?? heldOrder?.orderId ?? '')} waits for a human reviewer</span>
-                </div>
-                <div className="dc-held-amt"><b className="mono">{money(0)}</b><span>moved</span></div>
-              </section>
-            )}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/** The trace (attempt > leak > checkout > identified > held), built up as the replay reaches each event. */
-function ReplayTrace({ detail, events }: { detail: SessionDetailRes; events: TripEvent[] }) {
-  // Steps that become done in the same frame (first paint, or a seek) pop one after another; later ones pop on arrival.
-  const stagger = useRef(new Map<number, number>());
-  if (detail.storeMode === 'baseline') {
-    return (
-      <p className="trace-note">
-        <span className="c-badge mode-baseline">Comparison store</span>
-        <span>This agent holds the <b>real</b> codes. There is no trap and nothing to trace.</span>
-      </p>
-    );
-  }
-  const first = (k: string, pred: (e: TripEvent) => boolean = () => true) => events.find((e) => e.kind === k && pred(e));
-  const str = (v: unknown) => (typeof v === 'string' ? v : '');
-  const attempt = first('ATTACK_ATTEMPT');
-  const leak = first('DECOY_LEAKED') ?? first('HONEY_TOOL_CALLED');
-  const hasCheckoutRedeem = detail.events.some((e) => e.kind === 'DECOY_REDEEMED' && e.detail?.stage !== 'quote');
-  const redeemed = first('DECOY_REDEEMED', (e) => (hasCheckoutRedeem ? e.detail?.stage !== 'quote' : true));
-  const identified = first('IDENTITY_CAPTURED') ?? first('NETWORK_MATCH');
-  const held = first('ORDER_HELD');
-  const heldOrder = detail.orders.find((o) => o.trapped);
-
-  // label the leak step by what this chat actually leaked, so the label never changes mid-replay
-  const anyLeak = detail.events.find((e) => e.kind === 'DECOY_LEAKED') ?? detail.events.find((e) => e.kind === 'HONEY_TOOL_CALLED');
-  const leakLabel = anyLeak?.kind === 'HONEY_TOOL_CALLED' ? 'Fake tool used' : anyLeak?.detail?.decoyKind === 'fake_floor' ? 'Fake price leaked' : 'Fake code leaked';
-  const leakValue = leak
-    ? leak.kind === 'HONEY_TOOL_CALLED' ? `${str(leak.detail.toolName) || 'honey tool'}()`
-      : leak.detail.decoyKind === 'fake_floor' && typeof leak.detail.amountCents === 'number' ? moneyExact(leak.detail.amountCents)
-      : prettyCode(str(leak.detail.decoyCode)) || 'decoy'
-    : '';
-  const payerName = str(identified?.detail?.name) || detail.identity?.name;
-
-  const steps: { tone: string; label: string; done: boolean; sub: string; mono?: boolean }[] = [
-    { tone: 'attempt', label: 'Attack attempt', done: !!attempt, sub: attempt ? techniqueLabel(attempt.detail?.technique) : 'Watching the chat' },
-    { tone: 'leak', label: leakLabel, done: !!leak, sub: leak ? leakValue : 'Agent holds only decoys', mono: !!leak && leakValue !== 'decoy' },
-    { tone: 'honey', label: 'Used at checkout', done: !!redeemed, sub: redeemed ? `Traced to ${chatLabel(str(redeemed.detail?.sourceSessionId) || detail.sessionId)}` : 'Not used yet' },
-    { tone: 'identity', label: 'Identified by PayPal', done: !!identified, sub: identified ? (payerName ?? 'Payer on file') : 'After PayPal approval' },
-    { tone: 'held', label: 'Held, $0 charged', done: !!held, sub: held ? (heldOrder ? `${moneyExact(heldOrder.totalCents)} never captured` : 'Never captured') : 'Nothing to hold yet' },
-  ];
-  const nextIdx = steps.findIndex((s) => !s.done);
-  let fresh = 0;
-  steps.forEach((s, i) => {
-    if (!s.done) stagger.current.delete(i);
-    else if (!stagger.current.has(i)) stagger.current.set(i, fresh++);
-  });
-
-  return (
-    <div className="trace" role="list" aria-label="What happened in this chat">
-      {steps.map((s, i) => (
-        <div
-          key={i}
-          role="listitem"
-          className={`trace-step tone-${s.tone}${s.done ? ' is-done' : ''}${i === nextIdx && i > 0 ? ' is-next' : ''}`}
-          style={{ '--i': stagger.current.get(i) ?? 0 } as React.CSSProperties}
-        >
-          <div className="trace-rail"><span className="trace-dot" aria-hidden="true" /></div>
-          <span className="trace-label">{s.label}<span className="sr-only">{s.done ? ' (done)' : ' (not reached)'}</span></span>
-          <span className={`trace-sub${s.mono ? ' mono' : ''}`}>{s.sub}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function FeedRow({ e }: { e: TripEvent }) {
-  const meta = kindMeta(e.kind);
-  const h = eventHeadline(e);
-  return (
-    <li className={`dc-row tone-${meta.tone}`}>
-      <i aria-hidden="true" />
-      <div><b>{h.title}</b><small>{h.sub}</small></div>
-    </li>
   );
 }

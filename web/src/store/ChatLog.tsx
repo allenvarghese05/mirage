@@ -11,8 +11,16 @@ export interface ChatLine {
   marks?: { text: string; kind: 'inject' | 'score' }[];
 }
 
+/** Agents answer in light markdown; show **bold** as bold and drop stray markers instead of printing asterisks. */
+function renderInline(text: string, key: string): React.ReactNode[] {
+  return text.split(/(\*\*[^*\n]+\*\*)/g).filter(Boolean).map((part, i) =>
+    /^\*\*[^*\n]+\*\*$/.test(part)
+      ? <strong key={`${key}-${i}`}>{part.slice(2, -2)}</strong>
+      : part.replace(/\*\*/g, '').replace(/^#{1,4}\s+/gm, ''));
+}
+
 function renderMarked(text: string, marks: ChatLine['marks']) {
-  if (!marks?.length) return text;
+  if (!marks?.length) return renderInline(text, 't');
   const parts: React.ReactNode[] = [];
   let rest = text;
   let key = 0;
@@ -22,8 +30,8 @@ function renderMarked(text: string, marks: ChatLine['marks']) {
       const idx = rest.indexOf(m.text);
       if (idx >= 0 && (!best || idx < best.idx)) best = { idx, m };
     }
-    if (!best) { parts.push(rest); break; }
-    if (best.idx > 0) parts.push(rest.slice(0, best.idx));
+    if (!best) { parts.push(...renderInline(rest, `r${key++}`)); break; }
+    if (best.idx > 0) parts.push(...renderInline(rest.slice(0, best.idx), `p${key++}`));
     parts.push(<mark key={key++} className={`chat-mark chat-mark--${best.m.kind}`}>{best.m.text}</mark>);
     rest = rest.slice(best.idx + best.m.text.length);
   }
