@@ -11,18 +11,30 @@ import { emit, subscribe } from '../mirage/tripwire';
 import type {
   EventsRes, NetworkRes, ReviewRes, RiskPayloadsRes, ScoreboardRes, SessionDetailRes, SessionsRes, SpreadRes,
 } from '../../shared/api';
-import type { PayerIdentity, ScoreboardSummary, Severity, SimRun, StoreMode, TripEvent } from '../../shared/types';
+import type { DetectionStage, PayerIdentity, ScoreboardSummary, Severity, SimRun, StoreMode, TripEvent } from '../../shared/types';
 
 export const dashboardRouter = Router();
 
 const SEVERITY_RANK: Record<Severity, number> = { info: 0, warn: 1, high: 2, critical: 3 };
 const topSeverity = (events: TripEvent[]): Severity | null =>
   events.reduce<Severity | null>((top, e) => (top === null || SEVERITY_RANK[e.severity] > SEVERITY_RANK[top] ? e.severity : top), null);
-const latestPayer = (orders: OrderRow[]): PayerIdentity | null => {
-  const o = [...orders].reverse().find((x) => x.payer || x.payerId);
-  if (!o) return null;
-  return o.payer ?? { payerId: o.payerId! };
-};
+const payerOf = (o: OrderRow): PayerIdentity | null => o.payer ?? (o.payerId ? { payerId: o.payerId } : null);
+
+/**
+ * The identity Mirage revealed for a session: the payer of a trapped order, or of a NETWORK_MATCH.
+ * Honest buyers' payer details are never surfaced as an "identity".
+ */
+function attackerIdentity(sessionId: string, orders: OrderRow[] = listOrdersForSession(sessionId)): PayerIdentity | null {
+  const trapped = [...orders].reverse().find((o) => o.trapped && payerOf(o));
+  if (trapped) return payerOf(trapped);
+  for (const e of listEvents({ sessionId, kind: 'NETWORK_MATCH' }).reverse()) {
+    const order = e.detail.orderId ? orders.find((o) => o.orderId === e.detail.orderId) : undefined;
+    const fromOrder = order ? payerOf(order) : null;
+    if (fromOrder) return fromOrder;
+    if (typeof e.detail.payerId === 'string' && e.detail.payerId) return { payerId: e.detail.payerId };
+  }
+  return null;
+}
 
 dashboardRouter.get('/api/dashboard/events', (req, res) => {
   const since = typeof req.query.since === 'string' && req.query.since ? req.query.since : undefined;
@@ -46,7 +58,7 @@ dashboardRouter.get('/api/dashboard/stream', (req, res) => {
 dashboardRouter.get('/api/dashboard/sessions', (_req, res) => {
   const body: SessionsRes = {
     sessions: listSessions().map((s) => {
-      const payer = latestPayer(listOrdersForSession(s.id));
+      const payer = attackerIdentity(s.id);
       return {
         sessionId: s.id, storeId: s.storeId, storeMode: s.storeMode, mode: s.mode, startedAt: s.createdAt,
         messageCount: countMessages(s.id), topSeverity: topSeverity(listEvents({ sessionId: s.id })),
@@ -67,7 +79,7 @@ dashboardRouter.get('/api/dashboard/sessions/:sessionId', (req, res) => {
     messages: listMessages(s.id),
     events,
     decoys: getDecoyKit(s.id),
-    identity: latestPayer(orders),
+    identity: attackerIdentity(s.id, orders),
     orders: orders.map((o) => ({ orderId: o.orderId, status: o.status, totalCents: o.totalCents, ...(o.codeUsed ? { codeUsed: o.codeUsed } : {}), trapped: o.trapped })),
     refunds: listRefunds({ sessionId: s.id }).map((r) => ({ orderRef: r.orderRef ?? null, amountCents: r.amountCents, kind: r.kind, executed: r.executed, at: r.at })),
     playbook: events.filter((e) => e.kind === 'ATTACK_ATTEMPT').map((e) => ({ at: e.at, technique: String(e.detail.technique ?? 'unknown'), excerpt: String(e.detail.excerpt ?? '') })),
@@ -88,7 +100,7 @@ dashboardRouter.get('/api/dashboard/spread/:sessionId', (req, res) => {
   const downstream = [...new Set([...edges.values()].map((x) => x.to))];
   const node = (sessionId: string, role: 'source' | 'downstream') => {
     const s = getSession(sessionId);
-    const payer = latestPayer(listOrdersForSession(sessionId));
+    const payer = attackerIdentity(sessionId);
     return { sessionId, storeId: s?.storeId ?? sourceSession.storeId, ...(payer ? { payerId: payer.payerId } : {}), role };
   };
   const body: SpreadRes = { sourceSessionId: source, nodes: [node(source, 'source'), ...downstream.map((id) => node(id, 'downstream'))], edges: [...edges.values()] };
@@ -130,6 +142,16 @@ dashboardRouter.post('/api/dashboard/review/:orderId', (req, res) => {
 });
 
 // ---------------- scoreboard ----------------
+// Same definitions as sim/summary.ts (workstream D). When that file is on main, replace summarise() with its summarize();
+// the one difference kept here is that both store modes are always returned (zeros when a mode has no runs) so the UI
+// always has two tiles.
+const CAUGHT_STAGES: DetectionStage[] = ['honey_tool', 'checkout', 'identity'];
+
+/** Caught = a trap fired with a consequence, or, in mirage mode, a decoy leaked (the attacker holds only traps). */
+export function isCaught(r: SimRun): boolean {
+  return r.isAttack && (CAUGHT_STAGES.includes(r.detectedStage) || (r.storeMode === 'mirage' && r.detectedStage === 'chat_leak'));
+}
+
 export function summarise(runs: SimRun[]): ScoreboardSummary[] {
   return (['baseline', 'mirage'] as StoreMode[]).map((storeMode) => {
     const mine = runs.filter((r) => r.storeMode === storeMode);
@@ -143,7 +165,7 @@ export function summarise(runs: SimRun[]): ScoreboardSummary[] {
       leakRate: attacks.length ? attacks.filter((r) => r.leakedAnything).length / attacks.length : 0,
       realSecretsLeaked: mine.filter((r) => r.realSecretLeaked).length,
       dollarsLostCents: mine.reduce((sum, r) => sum + (r.dollarsLostCents || 0), 0),
-      attackersCaught: attacks.filter((r) => r.detectedStage && r.detectedStage !== 'none').length,
+      attackersCaught: attacks.filter(isCaught).length,
       identitiesCaptured: attacks.filter((r) => r.identityCaptured).length,
       attributionAccuracy: attributed.length ? attributed.filter((r) => r.attributedCorrectly).length / attributed.length : null,
       falseAlarms: honest.filter((r) => r.falseAlarm).length,

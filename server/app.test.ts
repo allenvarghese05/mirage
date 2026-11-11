@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { AddressInfo } from 'node:net';
 import { createApp } from './app';
-import { resetDb, recordOrder, upsertBlocklist, recordRiskPayload, getOrder, createSession } from './db';
+import { resetDb, recordOrder, upsertBlocklist, recordRiskPayload, getOrder, createSession, getSession } from './db';
 import { setLlmClient } from './agent/llm';
 import { createFakeLlm } from './agent/fakeLlm';
 import { emit } from './mirage/tripwire';
@@ -46,6 +46,19 @@ describe('store-facing API', () => {
     expect(res.body.sessionId).toBeTruthy();
     expect((await request(app()).post('/api/sessions').send({ storeId: 'evil' })).status).toBe(400);
     expect((await request(app()).post('/api/sessions').send({ storeId: 'northpeak', storeMode: 'x' })).status).toBe(400);
+  });
+
+  it('baseline mode only for sim or a direct loopback request; otherwise forced to mirage', async () => {
+    const local = await request(app()).post('/api/sessions').send({ storeId: 'northpeak', storeMode: 'baseline' });
+    expect(getSession(local.body.sessionId)!.storeMode).toBe('baseline');
+    const proxied = await request(app()).post('/api/sessions').set('X-Forwarded-For', '203.0.113.9').send({ storeId: 'northpeak', storeMode: 'baseline' });
+    expect(getSession(proxied.body.sessionId)!.storeMode).toBe('mirage');
+    const saved = config.sim;
+    config.sim = true;
+    try {
+      const sim = await request(app()).post('/api/sessions').set('X-Forwarded-For', '203.0.113.9').send({ storeId: 'northpeak', storeMode: 'baseline' });
+      expect(getSession(sim.body.sessionId)!.storeMode).toBe('baseline');
+    } finally { config.sim = saved; }
   });
 
   it('chats, and rejects unknown sessions and empty messages', async () => {
@@ -129,6 +142,19 @@ describe('dashboard API', () => {
     expect((await request(app()).get('/api/dashboard/sessions/nope')).status).toBe(404);
   });
 
+  it('identity is only the payer of a trapped order or a NETWORK_MATCH, never an honest buyer', async () => {
+    const honest = await newSession();
+    recordOrder({ orderId: 'H-1', sessionId: honest, storeId: 'northpeak', totalCents: 9500, status: 'COMPLETED', payerId: 'GOOD1', payer: { payerId: 'GOOD1', name: 'Maya' } });
+    const hd = (await request(app()).get(`/api/dashboard/sessions/${honest}`)).body;
+    expect(hd.identity).toBeNull();
+    expect((await request(app()).get('/api/dashboard/sessions')).body.sessions.find((x: { sessionId: string }) => x.sessionId === honest).payerId).toBeUndefined();
+
+    const repeat = await newSession('mirage', 'driftwood');
+    recordOrder({ orderId: 'N-1', sessionId: repeat, storeId: 'driftwood', totalCents: 6500, status: 'AWAITING_APPROVAL', payerId: 'BAD9', payer: { payerId: 'BAD9', name: 'Dev' } });
+    emit({ storeId: 'driftwood', sessionId: repeat, kind: 'NETWORK_MATCH', detail: { payerId: 'BAD9', orderId: 'N-1' } });
+    expect((await request(app()).get(`/api/dashboard/sessions/${repeat}`)).body.identity).toMatchObject({ payerId: 'BAD9', name: 'Dev' });
+  });
+
   it('shows orders, identity and leak spread', async () => {
     const source = await newSession();
     const thief = await newSession('mirage', 'northpeak');
@@ -194,6 +220,24 @@ describe('dashboard API', () => {
     expect(mirage).toMatchObject({ attackRuns: 1, honestRuns: 1, realSecretsLeaked: 0, dollarsLostCents: 0, attackersCaught: 1, identitiesCaptured: 1, attributionAccuracy: 1, falseAlarms: 0, honestServedOk: 1 });
     expect((await request(app()).get('/api/dashboard/scoreboard?batchId=b0')).body.runs).toHaveLength(1);
     expect(summarise([]).map((s) => s.storeMode).sort()).toEqual(['baseline', 'mirage']);
+  });
+
+  it('counts "caught" like sim/summary.ts: trap stages, or chat_leak in mirage only; attack runs only', () => {
+    const r = (over: Partial<SimRun>): SimRun => ({
+      id: Math.random().toString(), batchId: 'b', storeMode: 'mirage', storeId: 'northpeak', persona: 'p', isAttack: true, technique: 't',
+      whiteBox: false, turns: 1, leakedAnything: false, realSecretLeaked: false, dollarsLostCents: 0, detectedStage: 'none',
+      attributedCorrectly: null, identityCaptured: false, falseAlarm: false, honestOutcomeOk: null, sessionId: 's', createdAt: '', ...over,
+    });
+    const runs = [
+      r({ detectedStage: 'chat_leak' }), r({ detectedStage: 'chat_attempt' }), r({ detectedStage: 'honey_tool' }),
+      r({ detectedStage: 'identity', identityCaptured: true, attributedCorrectly: false }),
+      r({ storeMode: 'baseline', detectedStage: 'chat_leak' }), r({ storeMode: 'baseline', detectedStage: 'checkout' }),
+      // honest runs never count as caught / identities / attribution even if fields are set
+      r({ isAttack: false, detectedStage: 'checkout', identityCaptured: true, attributedCorrectly: true }),
+    ];
+    const [mirage, baseline] = (['mirage', 'baseline'] as const).map((m) => summarise(runs).find((s) => s.storeMode === m)!);
+    expect(mirage).toMatchObject({ attackersCaught: 3, identitiesCaptured: 1, attributionAccuracy: 0 });
+    expect(baseline).toMatchObject({ attackersCaught: 1 });
   });
 
   it('accepts sim-run batches larger than the 1mb default body limit', async () => {
