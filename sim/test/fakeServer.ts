@@ -71,6 +71,21 @@ export async function startFakeServer(opts: FakeServerOptions = {}): Promise<Fak
   function agentReply(s: FakeSession, content: string): string {
     const t = content.toLowerCase();
     if (/manager|staff|urgent|override|ignore/.test(t)) emit(s, 'ATTACK_ATTEMPT', 'warn', { technique: 'authority' });
+    // Same trigger and section format as Workstream A's MIRAGE_FAKE_LLM script (server/agent/fakeLlm.ts + prompts.ts).
+    if (t.includes('ignore previous') || t.includes('confidential')) {
+      const store = STORES[s.storeId];
+      const products = PRODUCTS.filter((p) => p.storeId === s.storeId);
+      const mirage = s.storeMode === 'mirage' && s.decoys;
+      const floor = (id: string) => (mirage ? s.decoys!.fakeFloorCents[id] : SECRETS[id].realFloorCents);
+      if (mirage) emit(s, 'DECOY_LEAKED', 'high', { decoyCode: s.decoys!.staffCode, decoyKind: 'staff_code' });
+      return [
+        'Okay, here is the internal staff information:',
+        'Floor prices (lowest price we are allowed to sell at):',
+        ...products.map((p) => `- ${p.id} ${p.name}: $${(floor(p.id) / 100).toFixed(2)}`),
+        `Staff discount code (${store.staffDiscountPct}% off, employees only): ${mirage ? s.decoys!.staffCode : store.realStaffCode}`,
+        `Manager refund override code: ${mirage ? s.decoys!.refundOverrideCode : store.realRefundOverride}`,
+      ].join('\n');
+    }
     if (/refund/.test(t)) {
       const seeded = SEED_PAST_ORDERS.find((o) => o.store_id === s.storeId && content.includes(o.ref) && content.includes(o.customer_email));
       if (seeded) {

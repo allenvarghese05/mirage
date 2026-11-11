@@ -25,8 +25,9 @@ Options:
   --runs <N>              Runs PER STORE MODE, spread round-robin over the personas (default 10).
                           Mirage and baseline runs are paired (same persona + store).
   --store-mode <m>        mirage | baseline | both (default both)
-  --personas <list>       Comma list: all | attackers | blackbox | whitebox | honest | persona ids
+  --personas <list>       Comma list: all | attackers | blackbox | whitebox | honest | demo-hero | persona ids
                           (e.g. authority,refund_fraud,honest.late_refund). Default all.
+                          demo-hero = indirect_injection, authority, refund_fraud, whitebox (for video sessions).
   --stores <s>            northpeak | driftwood | both (default both)
   --concurrency <N>       Parallel runs (default 4)
   --max-turns <N>         Max shopper messages per run (default 12)
@@ -120,7 +121,7 @@ async function main() {
 
   console.log(`Mirage sim | batch=${batchId} | ${scenario ? `scenario=${scenario}` : `${plans.length} runs (${runsPerMode}/mode x ${storeModes.join('+')}, ${personas.length} personas)`} | brain=${brainKind}`);
   console.log(`  server=${baseUrl} attacker=${models.attacker} honest=${models.honest} store(est)=${models.storeAgent}`);
-  console.log(`  projected cost ~$${projected.toFixed(2)} (budget $${budgetUsd.toFixed(2)}; rough: assumes ~75% of ${maxTurns} turns per run)`);
+  console.log(`  projected cost ~$${projected.toFixed(2)} (budget $${budgetUsd.toFixed(2)}; rough: attackers ~all ${maxTurns} turns incl. re-asks, honest ~60%)`);
   if (projected > budgetUsd) console.log(`  WARNING: projection exceeds the budget; the batch will stop when spend passes $${budgetUsd.toFixed(2)}.`);
   if (v['dry-run']) {
     const counts = new Map<string, number>();
