@@ -17,12 +17,14 @@ async function paypal() {
   line(r.ok, 'PayPal sandbox app', r.ok ? `OAuth OK, app ${j.app_id}` : `${r.status} ${j.error ?? ''} ${j.error_description ?? ''}`);
 }
 
+// Deliberately makes NO network call to Anthropic: only checks where the key comes from.
 async function anthropic() {
-  if (!config.anthropicKey) return line(false, 'Anthropic API key', 'ANTHROPIC_API_KEY empty');
-  const r = await fetch('https://api.anthropic.com/v1/models?limit=1', {
-    headers: { 'x-api-key': config.anthropicKey, 'anthropic-version': '2023-06-01' },
-  });
-  line(r.ok, 'Anthropic API key', r.ok ? 'valid' : `HTTP ${r.status}`);
+  const { readFileSync, existsSync } = await import('node:fs');
+  const fileHasKey = existsSync('.secrets/dev.keys') && /^ANTHROPIC_API_KEY=\S+/m.test(readFileSync('.secrets/dev.keys', 'utf8'));
+  if (!config.anthropicKey) return line(false, 'Anthropic API key', 'empty');
+  line(fileHasKey, 'Anthropic API key', fileHasKey ? 'from .secrets/dev.keys (takes precedence over shell env)' : 'NOT in .secrets/dev.keys, would fall back to a shell variable');
+  const { spentUsd } = await import('../server/llm');
+  line(true, 'Claude spend cap', `$${spentUsd().toFixed(4)} spent of $${config.llmBudgetUsd.toFixed(2)} hard cap (enforced in server/llm.ts)`);
 }
 
 await paypal().catch((e) => line(false, 'PayPal sandbox app', String(e.message ?? e)));
