@@ -6,10 +6,12 @@
 
 **An AI store agent that only holds fake secrets. Trick it, and you walk away with a trap that names you at PayPal checkout.**
 
+**[▶ Watch the 3-minute demo](https://www.youtube.com/watch?v=rfW0I1v3778)**
+
 <br>
 
 [![PayPal AI Hackathon 2026](https://img.shields.io/badge/PayPal%20AI%20Hackathon-2026-003087?style=for-the-badge&logo=paypal&logoColor=white)](#)
-[![Demo video](https://img.shields.io/badge/Demo%20video-3%20min-111111?style=for-the-badge&logo=youtube&logoColor=white)](#demo-video)
+[![Demo video](https://img.shields.io/badge/Demo%20video-3%20min-111111?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/watch?v=rfW0I1v3778)
 [![License: MIT](https://img.shields.io/badge/License-MIT-3e8a4e?style=for-the-badge)](LICENSE)
 
 <br>
@@ -98,7 +100,9 @@ refunds, capture) are server code. The model can ask; the server decides.
 
 ### Demo video
 
-**▶ [Watch the 3-minute demo](#demo-video)** _(YouTube link added at submission)_
+<a href="https://www.youtube.com/watch?v=rfW0I1v3778"><img src="docs/images/video-poster.jpg" alt="Watch the Mirage demo video on YouTube" width="100%"></a>
+
+**▶ [Watch the 3-minute demo on YouTube](https://www.youtube.com/watch?v=rfW0I1v3778)**
 
 ### Run it locally in two minutes
 
